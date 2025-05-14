@@ -429,9 +429,11 @@ npm run start
 
 ## 项目状态
 
-![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/BruceBlink/database-design-and-implementation/deploy.yml)
-![翻译进度](https://img.shields.io/badge/翻译进度-83%25-green)
-![License](https://img.shields.io/badge/license-MIT-blue)
+![部署状态](https://img.shields.io/github/deployments/likanu/database-design-and-implementation/Production?label=vercel&logo=vercel)
+![最近更新](https://img.shields.io/github/last-commit/likanu/database-design-and-implementation?label=最近更新)
+![翻译进度](https://img.shields.io/badge/翻译进度-5%25-green)
+![维护状态](https://img.shields.io/badge/维护状态-积极维护-brightgreen)
+![许可证](https://img.shields.io/badge/许可证-MIT-blue)
 
 ## 联系方式
 
