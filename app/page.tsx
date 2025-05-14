@@ -33,7 +33,7 @@ export default async function Home() {
                 >
                   <div className="flex items-center space-x-4">
                     <span className="text-sm text-gray-500 dark:text-gray-400">
-                      {(index + 1).toString().padStart(2, '0')}
+                      {chapter.slug === 'preface' ? '00' : (index).toString().padStart(2, '0')}
                     </span>
                     <span className="text-lg text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400">
                       {chapter.title}

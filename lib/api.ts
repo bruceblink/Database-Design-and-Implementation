@@ -23,7 +23,12 @@ export interface Section {
 export async function getAllChapters(): Promise<Chapter[]> {
   const files = fs.readdirSync(chaptersDirectory)
     .filter(filename => filename.endsWith('.md'))
-    .sort()
+    .sort((a, b) => {
+      // 确保 preface.md 排在最前面
+      if (a === 'preface.md') return -1
+      if (b === 'preface.md') return 1
+      return a.localeCompare(b)
+    })
 
   const chapters = await Promise.all(
     files.map(async (filename) => {
