@@ -66,10 +66,15 @@ export async function getAllChapters(): Promise<Chapter[]> {
 }
 
 export async function getChapterContent(slug: string): Promise<Chapter | null> {
-  // 获取所有章节文件
+  // 获取所有章节文件并按照与 getAllChapters 相同的规则排序
   const files = fs.readdirSync(chaptersDirectory)
     .filter(file => file.endsWith('.md'))
-    .sort()  // 确保按文件名排序
+    .sort((a, b) => {
+      // 确保 preface.md 排在最前面
+      if (a === 'preface.md') return -1
+      if (b === 'preface.md') return 1
+      return a.localeCompare(b)
+    })
 
   const fileIndex = files.findIndex(file => file === `${slug}.md`)
   if (fileIndex === -1) {
