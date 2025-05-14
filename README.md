@@ -343,7 +343,7 @@ database-design-and-implementation/
 
 ## 在线阅读
 
-在线文档正在部署中，敬请期待。
+在线文档: [Database Design and Implementation Second Edition 中文翻译](https://database-design-and-implementation.vercel.app/)。
 
 ## 本地开发
 
@@ -438,4 +438,4 @@ npm run start
 - 项目维护者：[邮箱](mailto:BruceBlinkg.g@qq.com)
 - 项目仓库：[GitHub](https://github.com/BruceBlink/database-design-and-implementation)
 - 问题反馈：[Issues](https://github.com/BruceBlink/database-design-and-implementation/issues)
-- 在线文档：[Vercel](https://db-design-impl.vercel.app)
+- 在线文档：[Vercel](https://database-design-and-implementation.vercel.app/)
