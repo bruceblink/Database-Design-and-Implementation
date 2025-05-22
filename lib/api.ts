@@ -20,16 +20,26 @@ export interface Section {
   parent: string
 }
 
-export async function getAllChapters(): Promise<Chapter[]> {
-  const files = fs.readdirSync(chaptersDirectory)
+function getAllMarkdownFiles(dirPath: string): string[] {
+    const files = fs.readdirSync(dirPath)
     .filter(filename => filename.endsWith('.md'))
     .sort((a, b) => {
       // 确保 preface.md 排在最前面
       if (a === 'preface.md') return -1
       if (b === 'preface.md') return 1
-      return a.localeCompare(b)
+      // 处理特殊情况：Appendix.md 应该排在最后
+      if (a === 'Appendix.md') return 1
+      if (b === 'Appendix.md') return -1
+      // 提取章节号并转换为数字进行比较
+      const numA = parseInt(a.match(/chapter(\d+)\.md/)?.[1] || '0')
+      const numB = parseInt(b.match(/chapter(\d+)\.md/)?.[1] || '0')
+      return numA - numB
     })
+    return files
+}
 
+export async function getAllChapters(): Promise<Chapter[]> {
+  const files = getAllMarkdownFiles(chaptersDirectory)
   const chapters = await Promise.all(
     files.map(async (filename) => {
       const slug = filename.replace(/\.md$/, '')
@@ -67,14 +77,7 @@ export async function getAllChapters(): Promise<Chapter[]> {
 
 export async function getChapterContent(slug: string): Promise<Chapter | null> {
   // 获取所有章节文件并按照与 getAllChapters 相同的规则排序
-  const files = fs.readdirSync(chaptersDirectory)
-    .filter(file => file.endsWith('.md'))
-    .sort((a, b) => {
-      // 确保 preface.md 排在最前面
-      if (a === 'preface.md') return -1
-      if (b === 'preface.md') return 1
-      return a.localeCompare(b)
-    })
+  const files = getAllMarkdownFiles(chaptersDirectory)
 
   const fileIndex = files.findIndex(file => file === `${slug}.md`)
   if (fileIndex === -1) {
