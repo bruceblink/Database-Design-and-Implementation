@@ -4,7 +4,7 @@
 
 《Database Design and Implementation Second Edition》是一本深入探讨数据库系统设计与实现的经典著作。本项目旨在将该书翻译成中文，使中文读者能够更好地学习和理解数据库系统的核心概念。
 
-### 目标读者
+## 目标读者
 
 - 数据库系统开发者和工程师
 - 计算机科学研究人员
@@ -258,7 +258,7 @@ npm run start
 
 ## 翻译进度
 
-- [ ] 第1章：数据库系统（Database Systems）
+- [x] 第1章：数据库系统（Database Systems）
 - [ ] 第2章：JDBC
 - [ ] 第3章：磁盘与文件管理（Disk and File Management）
 - [ ] 第4章：内存管理（Memory Management）
@@ -306,7 +306,7 @@ npm run start
 
 ![部署状态](https://img.shields.io/github/deployments/BruceBlink/database-design-and-implementation/Production?label=vercel&logo=vercel)
 ![最近更新](https://img.shields.io/github/last-commit/BruceBlink/database-design-and-implementation?label=最近更新)
-![翻译进度](https://img.shields.io/badge/翻译进度-5%25-green)
+![翻译进度](https://img.shields.io/badge/翻译进度-6%25-green)
 ![维护状态](https://img.shields.io/badge/维护状态-积极维护-brightgreen)
 ![许可证](https://img.shields.io/badge/许可证-MIT-blue)
 
