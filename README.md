@@ -263,7 +263,7 @@ npm run start
 - [ ] 第3章：磁盘与文件管理（Disk and File Management）
 - [ ] 第4章：内存管理（Memory Management）
 - [ ] 第5章： 事务管理（Transaction Management）
-- [ ] 第6章： 事务管理（Transaction Management）
+- [ ] 第6章： 记录管理（Record Management）
 - [ ] 第7章： 元数据管理（Metadata Management）
 - [ ] 第8章： 查询处理（Query Processing）
 - [ ] 第9章： 解析（Parsing）
