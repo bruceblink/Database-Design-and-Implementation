@@ -1022,3 +1022,47 @@ public class CleverFindMajors {
 
 - 编写 JDBC 客户端时，经验法则是**尽可能让引擎完成更多工作**。数据库引擎非常复杂，通常知道获取所需数据的最有效方式。客户端确定一个精确获取所需数据的 SQL 语句并将其提交给引擎几乎总是最佳实践。简而言之，**程序员必须相信引擎会做好它的工作**。
 
+## 2.5 建议阅读 (Suggested Reading)
+
+关于 JDBC 的一本全面且编写精良的书是 Fisher 等人 (2003) 的著作，其中一部分内容可在 [docs.oracle.com/javase/tutorial/jdbc](https://docs.oracle.com/javase/tutorial/jdbc) 在线教程中找到。此外，每个数据库供应商都提供解释其驱动程序使用以及其他供应商特定问题的文档。如果您打算为特定引擎编写客户端，那么熟悉这些文档至关重要。
+
+Fisher, M., Ellis, J., & Bruce, J. (2003). *JDBC API tutorial and reference* (3rd ed.). Addison Wesley.
+
+## 2.6 练习 (Exercises)
+
+### 概念练习 (Conceptual Exercises)
+
+2.1. Derby 文档建议在执行一系列插入操作时关闭自动提交。解释你认为它做出此建议的原因。
+
+### 编程练习 (Programming Exercises)
+
+2.2. 为大学数据库编写一些 SQL 查询。对于每个查询，编写一个使用 Derby 执行该查询并打印其输出表的程序。
+
+2.3. `SimpleIJ` 程序要求每个 SQL 语句都是单行文本。修改它，使其语句可以包含多行并以分号终止，类似于 Derby 的 `ij` 程序。
+
+2.4. 为 SimpleDB 编写一个 `NetworkDataSource` 类，使其功能类似于 Derby 的 `ClientDataSource` 类。将此`类`添加到 `simpledb.jdbc.network` 包中。你的代码无需实现 `javax.sql.DataSource` 接口（及其超类）的所有方法；事实上，它只需要实现其中无参数的 `getConnection()` 方法。`NetworkDataSource` 应该有哪些供应商特定的方法？
+
+2.5. 能够创建包含 SQL 命令的文本文件通常很有用。然后，这些命令可以通过 JDBC 程序批量执行。编写一个 JDBC 程序，从指定的文本文件读取命令并执行它们。假设文件的每一行都是一个单独的命令。
+
+2.6. 研究如何使用结果集填充 Java `JTable` 对象。（提示：你需要扩展 `AbstractTableModel` 类。）然后修改 `FindMajors` 演示客户端，使其具有一个 GUI 界面，并在 `JTable` 中显示其输出。
+
+2.7. 为以下任务编写 JDBC 代码：
+
+(a) 将数据从文本文件导入到现有表中。文本文件应每行包含一条记录，每个字段用制表符分隔。文件的第一行应该是字段的名称。客户端应将文件名和表名作为输入，并将记录插入到表中。
+
+(b) 将数据导出到文本文件。客户端应将文件名和表名作为输入，并将每条记录的内容写入文件中。文件的第一行应该是字段的名称。
+
+2.8. 本章忽略了结果集中可能存在空值的情况。要检查空值，可以使用 `ResultSet` 中的 `wasNull` 方法。假设您调用 `getInt` 或 `getString` 来检索字段值。如果您立即调用 `wasNull`，如果检索到的值为 null，它将返回 `true`。例如，以下循环打印毕业年份，假设其中一些可能为 null：
+
+```java
+while(rs.next()) {
+    int gradyr = rs.getInt("gradyear");
+    if (rs.wasNull())
+        System.out.println("null");
+    else
+        System.out.println(gradyr);
+}
+```
+
+(a) 假设学生姓名可能为空，重写 `StudentMajor` 演示客户端的代码。
+(b) 修改 `SimpleIJ` 演示客户端，使其连接到 Derby（而不是 SimpleDB）。然后假设任何字段值可能为空，重写代码。
