@@ -724,8 +724,6 @@ JDBC 类 `PreparedStatement` 处理参数化语句。客户端通过三个步骤
 
 例如，图 2.17 修改了 `FindMajors` 客户端以使用预处理语句。更改以粗体显示。最后三个粗体语句对应于上述三个要点。首先，客户端通过调用 `prepareStatement` 方法并传递参数化 SQL 语句作为参数来创建 `PreparedStatement` 对象。其次，客户端调用 `setString` 方法为第一个（也是唯一的）参数赋值。第三，该方法调用 `executeQuery` 来执行语句。
 
-Java
-
 ```java
 public class PreparedFindMajors {
     public static void main(String[] args) {
@@ -865,3 +863,121 @@ try (Connection conn = ds.getConnection()) {
 ### 2.2.6 附加数据类型 (Additional Data Types)
 
 除了整数和字符串值，JDBC 还包含操作许多其他类型的方法。例如，考虑 `ResultSet` 接口。除了 `getInt` 和 `getString` 方法，还有 `getFloat`、`getDouble`、`getShort`、`getTime`、`getDate` 和其他几种方法。这些方法中的每一个都将从当前记录的指定字段中读取值，并将其（如果可能）转换为指示的 Java 类型。当然，一般来说，在数字 SQL 字段上使用数字 JDBC 方法（如 `getInt`、`getFloat` 等）最有意义。但 JDBC 将尝试将任何 SQL 值转换为方法指示的 Java 类型。特别是，始终可以将任何 SQL 值转换为 Java 字符串。
+
+## 2.3 Java 与 SQL 中的计算 (Computing in Java vs. SQL)
+
+每当程序员编写 JDBC 客户端时，都必须做出一个重要决定：**计算的哪一部分应该由数据库引擎执行，哪一部分应该由 Java 客户端执行？** 本节将探讨这些问题。
+
+再次考虑图 2.5 的 `StudentMajor` 演示客户端。在该程序中，引擎通过执行 SQL 查询来计算 `STUDENT` 表和 `DEPT` 表的连接，从而执行所有计算。客户端的唯一职责是检索查询输出并打印它。
+
+相比之下，您也可以编写客户端，使其执行所有计算，如 图 2.22 所示。在该代码中，引擎的唯一职责是为 `STUDENT` 和 `DEPT` 表创建结果集。客户端完成所有其余工作，计算连接并打印结果。
+
+```java
+public class BadStudentMajor {
+    public static void main(String[] args) {
+        ClientDataSource ds = new ClientDataSource();
+        ds.setServerName("localhost");
+        ds.setDatabaseName("studentdb");
+        Connection conn = null; // 在 try-with-resources 外部声明 conn
+        try {
+            conn = ds.getConnection();
+            conn.setAutoCommit(false); // 关闭自动提交
+            try (Statement stmt1 = conn.createStatement();
+                 // stmt2 使用可滚动结果集，以便在内循环中重置位置
+                 Statement stmt2 = conn.createStatement(
+                     ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
+                 ResultSet rs1 = stmt1.executeQuery("select * from STUDENT");
+                 ResultSet rs2 = stmt2.executeQuery("select * from DEPT")) {
+
+                System.out.println("Name\tMajor");
+                while (rs1.next()) {
+                    // 获取下一个学生
+                    String sname = rs1.getString("SName");
+                    String dname = null;
+                    rs2.beforeFirst(); // 将 rs2 定位到第一条记录之前，以便重新开始搜索
+                    while (rs2.next())
+                        // 搜索该学生的专业
+                        if (rs2.getInt("DId") == rs1.getInt("MajorId")) {
+                            dname = rs2.getString("DName");
+                            break;
+                        }
+                    System.out.println(sname + "\t" + dname);
+                }
+            }
+            conn.commit(); // 提交事务
+            conn.close(); // 关闭连接
+        } catch (SQLException e) {
+            e.printStackTrace();
+            try {
+                if (conn != null) {
+                    conn.rollback(); // 发生异常时回滚
+                    conn.close(); // 关闭连接
+                }
+            } catch (SQLException e2) {
+                // 忽略回滚期间可能发生的异常
+            }
+        }
+    }
+}
+```
+
+**图 2.22 编码 StudentMajor 客户端的另一种（但糟糕的）方式**
+
+这两个版本哪个更好？显然，原始版本更优雅。它不仅代码量更少，而且代码更容易阅读。但是效率呢？根据经验法则，**在客户端中做尽可能少的工作总是更高效的**。主要有两个原因：
+
+- 通常**需要从引擎传输到客户端的数据更少**，如果它们在不同的机器上，这一点尤其重要。
+- 引擎包含关于每个表如何实现以及计算复杂查询（如连接）的可能方式的**详细专业知识**。客户端以与引擎相同的效率计算查询的可能性极低。
+
+例如，图 2.22 的代码使用两个嵌套循环来计算连接。外层循环遍历 `STUDENT` 记录。对于每个学生，内层循环搜索匹配该学生专业的 `DEPT` 记录。尽管这是一种合理的连接算法，但它效率不高。第 13 章和第 14 章讨论了几种可以实现更高效率执行的技术。
+
+图 2.5 和图 2.22 举例说明了真正好和真正坏的 JDBC 代码的极端情况，因此比较它们相当容易。但有时，比较更困难。例如，再次考虑图 2.17 的 `PreparedFindMajors` 演示客户端，它返回具有指定专业的学生。该代码要求引擎执行连接 `STUDENT` 和 `MAJOR` 的 SQL 查询。假设您知道执行连接可能很耗时。经过认真思考，您意识到无需使用连接即可获得所需的数据。其思想是使用两个单表查询。第一个查询扫描 `DEPT` 表以查找具有指定专业名称的记录并返回其 `DId` 值。第二个查询然后使用该值搜索 `STUDENT` 记录的 `MajorID` 值。此算法的代码出现在图 2.23 中。
+
+```java
+public class CleverFindMajors {
+    public static void main(String[] args) {
+        String major = args[0]; // 从命令行参数获取专业名称
+        String qry1 = "select DId from DEPT where DName = ?";
+        String qry2 = "select * from STUDENT where MajorId = ?";
+        ClientDataSource ds = new ClientDataSource();
+        ds.setServerName("localhost");
+        ds.setDatabaseName("studentdb");
+        try (Connection conn = ds.getConnection()) {
+            // 第一个预处理语句：查询部门 ID
+            PreparedStatement stmt1 = conn.prepareStatement(qry1);
+            stmt1.setString(1, major);
+            ResultSet rs1 = stmt1.executeQuery();
+            rs1.next(); // 移动到第一条记录
+            int deptid = rs1.getInt("DId"); // 获取部门 ID
+            rs1.close();
+            stmt1.close();
+
+            // 第二个预处理语句：查询学生
+            PreparedStatement stmt2 = conn.prepareStatement(qry2);
+            stmt2.setInt(1, deptid);
+            ResultSet rs2 = stmt2.executeQuery();
+
+            System.out.println("Here are the " + major + " majors");
+            System.out.println("Name\tGradYear");
+            while (rs2.next()) {
+                String sname = rs2.getString("sname");
+                int gradyear = rs2.getInt("gradyear");
+                System.out.println(sname + "\t" + gradyear);
+            }
+            rs2.close();
+            stmt2.close();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+**图 2.23 实现 FindMajors 客户端的一种巧妙方式**
+
+这个算法简单、优雅且高效。它只需要顺序扫描两个表中的每一个，并且应该比连接快得多。您可以为您的努力感到自豪。
+
+不幸的是，您的努力白费了。新算法并不是真正的新算法，而只是连接的一种巧妙实现——特别是，它是第 14 章中带有实体化内部表的**多缓冲区积 (multibuffer product)**。一个编写良好的数据库引擎会知道这种算法（以及其他几种算法），如果它证明是最有效的，就会用它来计算连接。因此，您的所有巧妙之处都被数据库引擎抢占了。教训与 `StudentMajor` 客户端相同：**让引擎完成工作往往是最有效的策略（也是最容易编码的策略）**。
+
+初学者 JDBC 程序员常犯的一个错误是，他们试图在客户端中做太多事情。程序员可能认为他或她知道一种在 Java 中实现查询的非常巧妙的方法。或者程序员可能不确定如何在 SQL 中表达查询，并且更乐意在 Java 中编码查询。在这些情况中的每一种情况下，在 Java 中编码查询的决定几乎总是错误的。
+
+**程序员必须相信数据库引擎会做好它的工作。**
