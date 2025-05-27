@@ -34,8 +34,6 @@ typora-root-url: ./..\..\public
 
 因此，数据库引擎必须**管理自己的页面**。它通过分配相对少量的、它知道能够放入物理内存的页面来做到这一点；这些页面被称为数据库的**缓冲区池 (buffer pool)**。引擎会跟踪哪些页面可用于交换。当一个块需要读入一个页面时，数据库引擎（而不是操作系统）从缓冲区池中选择一个可用页面，如果需要，将其内容（及其日志记录）写入磁盘，然后才读入指定的块。
 
-------
-
 ## 4.2 日志信息管理 (Managing Log Information)
 
 每当用户更改数据库时，数据库引擎都必须**跟踪该更改**，以备需要撤销。描述更改的值保存在**日志记录 (log record)** 中，日志记录存储在**日志文件 (log file)** 中。新的日志记录会**追加到日志的末尾**。
@@ -53,7 +51,6 @@ typora-root-url: ./..\..\public
 ```
 
 **图 4.1 将新记录追加到日志的简单（但低效）算法**
-
 
 此算法要求每个追加的日志记录进行一次磁盘读取和一次磁盘写入。它简单但效率非常低。图 4.2 说明了日志管理器在算法的第 3a 步进行到一半时的操作。日志文件包含三个块，这些块包含八条记录，标记为 r1 到 r8。日志记录的大小可能不同，这就是为什么块 0 中可以容纳四条记录，而块 1 中只能容纳三条记录的原因。块 2 尚未满，只包含一条记录。内存页面包含块 2 的内容。除了记录 r8，一条新的日志记录（记录 r9）刚刚被放入页面中。
 
@@ -79,3 +76,231 @@ typora-root-url: ./..\..\public
 ```
 
 **图 4.3 最佳日志管理算法**
+
+## 4.3 SimpleDB 日志管理器 (The SimpleDB Log Manager)
+
+本节将探讨 SimpleDB 数据库系统的日志管理器。第 4.3.1 节将演示日志管理器的使用。第 4.3.2 节将分析其实现。
+
+### 4.3.1 日志管理器的 API (The API for the Log Manager)
+
+SimpleDB 日志管理器的实现位于 `simpledb.log` 包中。此包公开了 `LogMgr` 类，其 API 如 图 4.4 所示。
+
+```java
+public class LogMgr {
+    // 构造函数：初始化 LogMgr 对象
+    public LogMgr(FileMgr fm, String logfile);
+
+    // 将记录追加到日志并返回其 LSN
+    public int append(byte[] rec);
+
+    // 确保指定的 LSN 及之前的记录已写入磁盘
+    public void flush(int lsn);
+
+    // 返回一个迭代器，用于反向读取日志记录
+    public Iterator<byte[]> iterator();
+}
+```
+
+**图 4.4 SimpleDB 日志管理器的 API**
+
+数据库引擎有一个 `LogMgr` 对象，它在系统启动时创建。构造函数的参数是对文件管理器的引用和日志文件的名称。
+
+`append` 方法将记录添加到日志并返回一个整数。就日志管理器而言，日志记录是一个任意大小的字节数组；它将数组保存在日志文件中，但不知道其内容表示什么。唯一的限制是数组必须适合一个页面。`append` 的返回值标识新的日志记录；此标识符称为其**日志序列号 (log sequence number，或 LSN)**。
+
+将记录追加到日志并不保证记录会写入磁盘；相反，日志管理器会选择何时将日志记录写入磁盘，如 图 4.3 的算法所示。客户端可以通过调用 `flush` 方法将特定日志记录强制写入磁盘。`flush` 的参数是日志记录的 LSN；该方法确保此日志记录（以及所有先前的日志记录）已写入磁盘。
+
+客户端调用 `iterator` 方法来读取日志中的记录；此方法返回日志记录的 Java 迭代器。每次调用迭代器的 `next` 方法都将返回一个表示日志中下一条记录的字节数组。迭代器方法返回的记录是**逆序**的，从最新的记录开始，然后向后遍历日志文件。记录以这种顺序返回是因为恢复管理器希望以这种方式查看它们。
+
+图 4.5 中的 `LogTest` 类提供了一个如何使用日志管理器 API 的示例。该代码创建了 70 条日志记录，每条记录包含一个字符串和一个整数。整数是记录号 N，字符串是值“recordN”。代码在创建前 35 条记录后打印一次记录，然后在创建所有 70 条记录后再打印一次。
+
+```java
+public class LogTest {
+    private static LogMgr lm;
+
+    public static void main(String[] args) {
+        SimpleDB db = new SimpleDB("logtest", 400, 8); // 初始化 SimpleDB 实例
+        lm = db.logMgr(); // 获取日志管理器实例
+
+        createRecords(1, 35); // 创建 1 到 35 号记录
+        printLogRecords("日志文件现在有这些记录:"); // 打印当前日志记录
+
+        createRecords(36, 70); // 创建 36 到 70 号记录
+        lm.flush(65); // 强制 LSN 为 65 的记录及其之前的记录写入磁盘
+        printLogRecords("日志文件现在有这些记录:"); // 再次打印日志记录
+    }
+
+    private static void printLogRecords(String msg) {
+        System.out.println(msg);
+        Iterator<byte[]> iter = lm.iterator(); // 获取日志迭代器
+        while (iter.hasNext()) {
+            byte[] rec = iter.next(); // 获取下一条日志记录（字节数组）
+            Page p = new Page(rec); // 将字节数组包装成 Page 对象
+            String s = p.getString(0); // 从 Page 中读取字符串
+            int npos = Page.maxLength(s.length()); // 计算整数的位置
+            int val = p.getInt(npos); // 从 Page 中读取整数
+            System.out.println("[" + s + ", " + val + "]"); // 打印记录内容
+        }
+        System.out.println();
+    }
+
+    private static void createRecords(int start, int end) {
+        System.out.print("正在创建记录: ");
+        for (int i = start; i <= end; i++) {
+            byte[] rec = createLogRecord("record" + i, i + 100); // 创建日志记录的字节数组
+            int lsn = lm.append(rec); // 将记录追加到日志
+            System.out.print(lsn + " "); // 打印返回的 LSN
+        }
+        System.out.println();
+    }
+
+    // 辅助方法：根据字符串和整数创建日志记录的字节数组
+    private static byte[] createLogRecord(String s, int n) {
+        int npos = Page.maxLength(s.length()); // 计算整数存储位置
+        byte[] b = new byte[npos + Integer.BYTES]; // 创建足够大的字节数组
+        Page p = new Page(b); // 包装成 Page
+        p.setString(0, s); // 写入字符串
+        p.setInt(npos, n); // 写入整数
+        return b;
+    }
+}
+```
+
+**图 4.5 测试日志管理器**
+
+如果您运行代码，您会发现第一次调用 `printLogRecords` 后只打印了 20 条记录。原因是这些记录填满了第一个日志块，并在创建第 21 条日志记录时被刷新到磁盘。其他 15 条日志记录保留在内存中的日志页面中，没有被刷新。第二次调用 `createRecords` 创建了记录 36 到 70。调用 `flush` 会告诉日志管理器确保记录 65 在磁盘上。但由于记录 66-70 与记录 65 位于同一页面中，它们也写入了磁盘。因此，第二次调用 `printLogRecords` 将逆序打印所有 70 条记录。
+
+请注意 `createLogRecord` 方法如何分配一个字节数组作为日志记录。它创建了一个 `Page` 对象来包装该数组，以便它可以使用页面的 `setInt` 和 `setString` 方法将字符串和整数放置在日志记录中适当的偏移量处。然后代码返回字节数组。类似地，`printLogRecords` 方法创建一个 `Page` 对象来包装日志记录，以便它可以从记录中提取字符串和整数。
+
+### 4.3.2 实现日志管理器 (Implementing the Log Manager)
+
+`LogMgr` 的代码如 图 4.6 所示。其构造函数使用提供的字符串作为日志文件的名称。如果日志文件为空，构造函数会向其追加一个新的空块。构造函数还会分配一个单独的页面（称为 `logpage`），并将其初始化为包含文件中最后一个日志块的内容。
+
+Java
+
+```java
+public class LogMgr {
+    private FileMgr fm; // 文件管理器实例
+    private String logfile; // 日志文件名称
+    private Page logpage; // 内存中的日志页面
+    private BlockId currentblk; // 当前日志块的 ID
+    private int latestLSN = 0; // 最新分配的 LSN
+    private int lastSavedLSN = 0; // 最后保存到磁盘的 LSN
+
+    public LogMgr(FileMgr fm, String logfile) {
+        this.fm = fm;
+        this.logfile = logfile;
+        byte[] b = new byte[fm.blockSize()]; // 创建一个字节数组，大小为文件管理器定义的块大小
+        logpage = new Page(b); // 将字节数组包装成 Page 对象
+        int logsize = fm.length(logfile); // 获取日志文件大小
+        if (logsize == 0) // 如果日志文件为空
+            currentblk = appendNewBlock(); // 追加一个新的空块
+        else {
+            currentblk = new BlockId(logfile, logsize - 1); // 设置当前块为日志文件最后一个块
+            fm.read(currentblk, logpage); // 将最后一个日志块的内容读入 logpage
+        }
+    }
+
+    // 刷新日志到指定 LSN
+    public void flush(int lsn) {
+        if (lsn >= lastSavedLSN) // 如果请求的 LSN 大于或等于最后保存的 LSN
+            flush(); // 执行实际的刷新操作
+    }
+
+    // 获取日志记录迭代器
+    public Iterator<byte[]> iterator() {
+        flush(); // 在创建迭代器前确保所有日志记录已写入磁盘
+        return new LogIterator(fm, currentblk); // 返回新的 LogIterator
+    }
+
+    // 将日志记录追加到日志
+    public synchronized int append(byte[] logrec) {
+        int boundary = logpage.getInt(0); // 获取当前页面的边界（已写入记录的起始偏移量）
+        int recsize = logrec.length; // 新记录的大小
+        int bytesneeded = recsize + Integer.BYTES; // 新记录所需的字节数（包括长度前缀）
+
+        if (boundary - bytesneeded < Integer.BYTES) { // 如果新记录不适合当前页面
+            flush(); // 将当前页面内容写入磁盘
+            currentblk = appendNewBlock(); // 追加一个新块，并将其内容读入 logpage
+            boundary = logpage.getInt(0); // 更新边界
+        }
+
+        int recpos = boundary - bytesneeded; // 计算新记录的起始位置
+        logpage.setBytes(recpos, logrec); // 将新记录写入页面
+        logpage.setInt(0, recpos); // 更新页面头部的边界
+        latestLSN += 1; // 增加最新 LSN
+        return latestLSN; // 返回新记录的 LSN
+    }
+
+    // 追加一个新块到日志文件
+    private BlockId appendNewBlock() {
+        BlockId blk = fm.append(logfile); // 在日志文件末尾追加一个新块
+        logpage.setInt(0, fm.blockSize()); // 将页面边界设置为块大小（表示整个页面为空）
+        fm.write(blk, logpage); // 将（空的）页面写入新块
+        return blk;
+    }
+
+    // 执行实际的刷新操作，将 logpage 内容写入磁盘
+    private void flush() {
+        fm.write(currentblk, logpage); // 将 logpage 内容写入当前块
+        lastSavedLSN = latestLSN; // 更新最后保存到磁盘的 LSN
+    }
+}
+```
+
+**图 4.6 SimpleDB 类 LogMgr 的代码**
+
+回想一下，**日志序列号 (LSN)** 标识一个日志记录。`append` 方法使用变量 `latestLSN` 从 1 开始顺序分配 LSN。日志管理器跟踪下一个可用的 LSN 和最近写入磁盘的日志记录的 LSN。`flush` 方法将最新 LSN 与指定 LSN 进行比较。如果指定 LSN 较小，则所需的日志记录肯定已经写入磁盘；否则，`logpage` 被写入磁盘，并且 `latestLSN` 成为最近写入的 LSN。
+
+`append` 方法计算日志记录的大小以确定它是否适合当前页面。如果不适合，它将当前页面写入磁盘并调用 `appendNewBlock` 以清除页面并将现在空的页面追加到日志文件。此策略与图 4.3 的算法略有不同；即，日志管理器通过向其追加一个空页面来扩展日志文件，而不是通过追加一个已满的页面来扩展文件。此策略实现起来更简单，因为它允许 `flush` 假定该块已经存在于磁盘上。
+
+请注意，`append` 方法将日志记录从右到左放置在页面中。变量 `boundary` 包含最近添加的记录的偏移量。此策略使日志迭代器能够通过从左到右读取来逆序读取记录。`boundary` 值写入页面的前四个字节，以便迭代器知道记录从何处开始。
+
+`iterator` 方法刷新日志（以确保整个日志都在磁盘上），然后返回一个 `LogIterator` 对象。`LogIterator` 类是一个包私有类，它实现了迭代器；其代码如 图 4.7 所示。`LogIterator` 对象分配一个页面来保存日志块的内容。构造函数将迭代器定位到日志中最后一个块的第一条记录（请记住，这是最后一条日志记录写入的位置）。`next` 方法移动到页面中的下一条记录；当没有更多记录时，它会读取前一个块
+
+Java
+
+```java
+class LogIterator implements Iterator<byte[]> {
+    private FileMgr fm; // 文件管理器实例
+    private BlockId blk; // 当前日志块的 ID
+    private Page p; // 内存中的页面，用于读取日志块
+    private int currentpos; // 当前在页面中读取的位置
+    private int boundary; // 当前页面中已写入记录的起始偏移量
+
+    public LogIterator(FileMgr fm, BlockId blk) {
+        this.fm = fm;
+        this.blk = blk;
+        byte[] b = new byte[fm.blockSize()]; // 创建一个字节数组，大小为文件管理器定义的块大小
+        p = new Page(b); // 将字节数组包装成 Page 对象
+        moveToBlock(blk); // 移动到指定的日志块并读取其内容
+    }
+
+    // 检查是否还有更多日志记录可供读取
+    public boolean hasNext() {
+        // 如果当前位置小于块大小（页面中还有未读取的数据）或者当前块号大于 0（前面还有块）
+        return currentpos < fm.blockSize() || blk.number() > 0;
+    }
+
+    // 获取下一条日志记录
+    public byte[] next() {
+        if (currentpos == fm.blockSize()) { // 如果当前页面已读完
+            blk = new BlockId(blk.fileName(), blk.number() - 1); // 移动到前一个块
+            moveToBlock(blk); // 读取前一个块的内容
+        }
+        byte[] rec = p.getBytes(currentpos); // 从当前位置读取字节数组（日志记录）
+        currentpos += Integer.BYTES + rec.length; // 更新当前位置，跳过已读记录的长度和其自身内容
+        return rec; // 返回日志记录
+    }
+
+    // 移动到指定块并读取其内容
+    private void moveToBlock(BlockId blk) {
+        fm.read(blk, p); // 将指定块的内容读入页面 p
+        boundary = p.getInt(0); // 获取页面头部的边界（日志记录的起始位置）
+        currentpos = boundary; // 将当前读取位置设置为边界
+    }
+}
+```
+
+**图 4.7 SimpleDB 类 LogIterator 的代码**
+
+进入页面并返回其第一条记录。`hasNext` 方法在页面中没有更多记录且没有更多前一个块时返回 `false`。
