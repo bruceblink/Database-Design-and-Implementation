@@ -175,8 +175,6 @@ public class LogTest {
 
 `LogMgr` 的代码如 图 4.6 所示。其构造函数使用提供的字符串作为日志文件的名称。如果日志文件为空，构造函数会向其追加一个新的空块。构造函数还会分配一个单独的页面（称为 `logpage`），并将其初始化为包含文件中最后一个日志块的内容。
 
-Java
-
 ```java
 public class LogMgr {
     private FileMgr fm; // 文件管理器实例
@@ -255,9 +253,7 @@ public class LogMgr {
 
 请注意，`append` 方法将日志记录从右到左放置在页面中。变量 `boundary` 包含最近添加的记录的偏移量。此策略使日志迭代器能够通过从左到右读取来逆序读取记录。`boundary` 值写入页面的前四个字节，以便迭代器知道记录从何处开始。
 
-`iterator` 方法刷新日志（以确保整个日志都在磁盘上），然后返回一个 `LogIterator` 对象。`LogIterator` 类是一个包私有类，它实现了迭代器；其代码如 图 4.7 所示。`LogIterator` 对象分配一个页面来保存日志块的内容。构造函数将迭代器定位到日志中最后一个块的第一条记录（请记住，这是最后一条日志记录写入的位置）。`next` 方法移动到页面中的下一条记录；当没有更多记录时，它会读取前一个块
-
-Java
+`iterator` 方法刷新日志（以确保整个日志都在磁盘上），然后返回一个 `LogIterator` 对象。`LogIterator` 类是一个包私有类，它实现了迭代器；其代码如 图 4.7 所示。`LogIterator` 对象分配一个页面来保存日志块的内容。构造函数将迭代器定位到日志中最后一个块的第一条记录（请记住，这是最后一条日志记录写入的位置）。`next` 方法移动到页面中的下一条记录；当没有更多记录时，它会读取前一个块进入页面并返回其第一条记录。
 
 ```java
 class LogIterator implements Iterator<byte[]> {
@@ -303,4 +299,4 @@ class LogIterator implements Iterator<byte[]> {
 
 **图 4.7 SimpleDB 类 LogIterator 的代码**
 
-进入页面并返回其第一条记录。`hasNext` 方法在页面中没有更多记录且没有更多前一个块时返回 `false`。
+`hasNext` 方法在页面中没有更多记录且没有更多前一个块时返回 `false`。
