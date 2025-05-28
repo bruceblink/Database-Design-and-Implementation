@@ -673,3 +673,208 @@ public class Buffer {
 当一个等待线程恢复时，它会继续其循环，尝试获取一个缓冲区（与所有其他等待线程一起）。该线程将不断被放回等待列表，直到它获得缓冲区或超出其时间限制。
 
 `unpin` 方法解除指定缓冲区的固定，然后检查该缓冲区是否仍处于固定状态。如果不是，则调用 `notifyAll` 以从等待列表中移除所有客户端线程。这些线程将争夺缓冲区；哪个线程首先被调度，哪个线程就赢。当其他线程之一被调度时，它可能会发现所有缓冲区仍处于分配状态；如果是这样，它将被放回等待列表。
+
+------
+
+## 4.6 本章总结 (Chapter Summary)
+
+- 数据库引擎必须努力**最小化磁盘访问**。因此，它仔细管理用于保存磁盘块的内存页面。管理这些页面的数据库组件是**日志管理器**和**缓冲区管理器**。
+- **日志管理器**负责将日志记录保存在日志文件中。由于日志记录总是追加到日志文件且永不修改，因此日志管理器可以非常高效。它只需要分配一个页面，并且有一个简单的算法来尽可能少地将该页面写入磁盘。
+- **缓冲区管理器**分配多个页面，称为**缓冲区池**，用于处理用户数据。缓冲区管理器根据客户端请求将缓冲区页面固定和解除固定到磁盘块。客户端在页面固定后访问缓冲区页面，并在完成后解除固定缓冲区。
+- 已修改的缓冲区将在两种情况下写入磁盘：**当页面被替换时**，以及**当恢复管理器需要它在磁盘上时**。
+
+```java
+public class BufferMgr {
+    private Buffer[] bufferpool; // 缓冲区池，存储 Buffer 对象的数组
+    private int numAvailable; // 当前可用（未固定）的缓冲区数量
+    private static final long MAX_TIME = 10000; // 线程等待缓冲区的最大时间，10 秒
+
+    // 构造函数：初始化缓冲区管理器
+    public BufferMgr(FileMgr fm, LogMgr lm, int numbuffs) {
+        bufferpool = new Buffer[numbuffs]; // 创建指定大小的缓冲区池
+        numAvailable = numbuffs; // 初始时所有缓冲区都可用
+        for (int i = 0; i < numbuffs; i++)
+            bufferpool[i] = new Buffer(fm, lm); // 初始化每个 Buffer 对象
+    }
+
+    // 获取当前可用缓冲区的数量（同步方法）
+    public synchronized int available() {
+        return numAvailable;
+    }
+
+    // 刷新所有由指定事务修改的页面到磁盘（同步方法）
+    public synchronized void flushAll(int txnum) {
+        for (Buffer buff : bufferpool)
+            if (buff.modifyingTx() == txnum) // 如果缓冲区被该事务修改过
+                buff.flush(); // 刷新该缓冲区
+    }
+
+    // 解除指定缓冲区的固定（同步方法）
+    public synchronized void unpin(Buffer buff) {
+        buff.unpin(); // 减少缓冲区的固定计数
+        if (!buff.isPinned()) { // 如果缓冲区不再被固定
+            numAvailable++; // 增加可用缓冲区计数
+            notifyAll(); // 通知所有等待缓冲区的线程
+        }
+    }
+
+    // 将指定块固定到缓冲区并返回对应的 Buffer 对象（同步方法）
+    public synchronized Buffer pin(BlockId blk) {
+        try {
+            long timestamp = System.currentTimeMillis(); // 记录开始等待时间
+            Buffer buff = tryToPin(blk); // 尝试固定缓冲区
+
+            // 如果没有找到可用缓冲区且未超时，则等待
+            while (buff == null && !waitingTooLong(timestamp)) {
+                wait(MAX_TIME); // 等待 MAX_TIME 毫秒或被 notifyAll 唤醒
+                buff = tryToPin(blk); // 再次尝试固定缓冲区
+            }
+
+            if (buff == null) // 如果最终仍未找到可用缓冲区
+                throw new BufferAbortException(); // 抛出异常
+            return buff; // 返回固定成功的缓冲区
+        } catch (InterruptedException e) {
+            throw new BufferAbortException(); // 处理中断异常
+        }
+    }
+
+    // 检查等待时间是否过长
+    private boolean waitingTooLong(long starttime) {
+        return System.currentTimeMillis() - starttime > MAX_TIME;
+    }
+
+    // 尝试固定缓冲区
+    private Buffer tryToPin(BlockId blk) {
+        Buffer buff = findExistingBuffer(blk); // 尝试查找已存在的缓冲区
+
+        if (buff == null) { // 如果不存在
+            buff = chooseUnpinnedBuffer(); // 选择一个未固定的缓冲区进行替换 (当前使用朴素策略)
+            if (buff == null)
+                return null; // 如果没有未固定的缓冲区，则返回 null
+            buff.assignToBlock(blk); // 将新块分配给选定的缓冲区
+        }
+
+        if (!buff.isPinned()) // 如果缓冲区之前没有被固定
+            numAvailable--; // 减少可用缓冲区计数
+
+        buff.pin(); // 增加缓冲区的固定计数
+        return buff; // 返回缓冲区
+    }
+
+    // 查找已存在并与指定块关联的缓冲区
+    private Buffer findExistingBuffer(BlockId blk) {
+        for (Buffer buff : bufferpool) {
+            BlockId b = buff.block();
+            if (b != null && b.equals(blk)) // 如果缓冲区关联的块 ID 与请求的块 ID 相同
+                return buff; // 返回该缓冲区
+        }
+        return null; // 未找到
+    }
+
+    // 选择一个未固定的缓冲区（当前使用朴素策略：找到第一个未固定的）
+    private Buffer chooseUnpinnedBuffer() {
+        for (Buffer buff : bufferpool)
+            if (!buff.isPinned()) // 如果缓冲区未被固定
+                return buff; // 返回该缓冲区
+        return null; // 未找到未固定的缓冲区
+    }
+}
+```
+
+**图 4.14 SimpleDB 类 BufferMgr 的代码**
+
+- 当客户端请求将页面固定到某个块时，缓冲区管理器会选择适当的缓冲区。如果该块的页面已在某个缓冲区中，则使用该缓冲区；否则，缓冲区管理器会替换现有缓冲区的内容。
+
+- 决定替换哪个缓冲区的算法称为
+
+  缓冲区替换策略
+
+  。四种有趣的替换策略是：
+
+  - **朴素策略 (Naïve)**：选择找到的第一个未固定缓冲区。
+  - **先进先出策略 (FIFO)**：选择内容最近最少被替换的未固定缓冲区。
+  - **最近最少使用策略 (LRU)**：选择内容最近最少被解除固定的未固定缓冲区。
+  - **时钟策略 (Clock)**：从上次替换的缓冲区开始顺序扫描缓冲区；选择找到的第一个未固定缓冲区。
+
+## 4.7 建议阅读 (Suggested Reading)
+
+Effelsberg 等人 (1984) 的文章对缓冲区管理进行了详尽而全面的论述，扩展了本章中的许多思想。Gray 和 Reuter (1993) 的第 13 章深入讨论了缓冲区管理，并以典型的缓冲区管理器的基于 C 的实现为例进行阐述。
+
+Oracle 的默认缓冲区替换策略是 LRU。然而，在扫描大表时，它使用 FIFO 替换。理由是表扫描通常在页面解除固定后不再需要该块，因此 LRU 最终会保存错误的块。详细信息可在 Ashdown 等人 (2019) 的第 14 章中找到。
+
+一些研究人员已经研究了如何使缓冲区管理器本身更智能。基本思想是缓冲区管理器可以跟踪每个事务的固定请求。如果它检测到某种模式（例如，事务重复读取文件的相同 N 个块），即使这些页面没有被固定，它也会尝试避免替换这些页面。Ng 等人 (1991) 的文章更详细地描述了这一思想并提供了一些模拟结果。
+
+- Ashdown, L., et al. (2019). Oracle database concepts. Document E96138-01,Oracle Corporation. 可从 <https://docs.oracle.com/en/database/oracle/oracle-database/19/cncpt/database-concepts.pdf> 获取。
+- Effelsberg, W., & Haerder, T. (1984). Principles of database buffer management.ACM Transactions on Database Systems, 9(4), 560–595.
+- Gray, J., & Reuter, A. (1993). Transaction processing: concepts and techniques.Morgan Kaufman.
+- Ng, R., Faloutsos, C., & Sellis, T. (1991). Flexible buffer allocation based on marginal gains. Proceedings of the ACM SIGMOD Conference, pp. 387–396.
+
+## 4.8 练习 (Exercises)
+
+### 概念性练习 (Conceptual Exercises)
+
+**4.1.** `LogMgr.iterator` 的代码调用了 `flush`。这个调用是必要的吗？请解释。
+
+**4.2.** 解释为什么 `BufferMgr.pin` 方法是同步的。如果它不是同步的，可能会出现什么问题？
+
+**4.3.** 是否有多个缓冲区可以分配给同一个块？请解释。
+
+4.4. 本章中的缓冲区替换策略在寻找可用缓冲区时，没有区分已修改和未修改的页面。一个可能的改进是，缓冲区管理器在可能的情况下总是替换未修改的页面。
+
+(a) 给出一个理由说明为什么这个建议可以减少缓冲区管理器进行的磁盘访问次数。
+
+(b) 给出一个理由说明为什么这个建议可以增加缓冲区管理器进行的磁盘访问次数。
+
+(c) 您认为这个策略值得吗？请解释。
+
+**4.5.** 另一种可能的缓冲区替换策略是**最近最少修改 (least recently modified)**：缓冲区管理器选择具有最低 LSN 的已修改缓冲区。解释为什么这种策略可能值得。
+
+**4.6.** 假设一个缓冲区页面已被修改多次但尚未写入磁盘。缓冲区只保存最近一次更改的 LSN，并在页面最终被刷新时只将这个 LSN 发送给日志管理器。解释为什么缓冲区不需要将其他 LSN 发送给日志管理器。
+
+**4.7.** 考虑图 4.9a 的示例固定/解除固定场景，以及附加操作 `pin(60); pin(70)`。对于文本中给出的四种替换策略，假设缓冲区池包含五个缓冲区，绘制出缓冲区的状态。
+
+4.8. 从图 4.9b 的缓冲区状态开始，给出一个场景，其中：
+
+(a) FIFO 策略需要的磁盘访问次数最少。
+
+(b) LRU 策略需要的磁盘访问次数最少。
+
+(c) 时钟策略需要的磁盘访问次数最少。
+
+**4.9.** 假设两个不同的客户端都想固定同一个块，但由于没有可用缓冲区而被置于等待列表。考虑 SimpleDB 类 `BufferMgr` 的实现。展示当单个缓冲区可用时，两个客户端都将能够使用它。
+
+**4.10.** 考虑谚语“虚拟是其自身的奖赏 (Virtual is its own reward)。”评论这个双关语的巧妙之处，并讨论它对缓冲区管理器的适用性。
+
+### 编程练习 (Programming Exercises)
+
+4.11. SimpleDB 日志管理器分配自己的页面并明确地将其写入磁盘。另一个设计选项是让它将一个缓冲区固定到最后一个日志块，并让缓冲区管理器处理磁盘访问。
+
+(a) 设计这个选项。需要解决哪些问题？这是一个好主意吗？
+
+(b) 修改 SimpleDB 以实现您的设计。
+
+4.12. 每个 LogIterator 对象都分配一个页面来保存它访问的日志块。
+
+(a) 解释为什么使用缓冲区而不是页面会更有效率。
+
+(b) 修改代码以使用缓冲区而不是页面。缓冲区应该如何解除固定？
+
+4.13. 本练习探讨 JDBC 程序是否可以恶意固定缓冲区池中的所有缓冲区。
+
+(a) 编写一个 JDBC 程序来固定 SimpleDB 缓冲区池中的所有缓冲区。当所有缓冲区都被固定时会发生什么？
+
+(b) Derby 数据库系统与 SimpleDB 的缓冲区管理方式不同。当 JDBC 客户端请求一个缓冲区时，Derby 会固定该缓冲区，将该缓冲区的副本发送给客户端，然后解除固定该缓冲区。解释为什么您的代码对其他 Derby 客户端不会是恶意的。
+
+(c) Derby 通过始终将页面从引擎复制到客户端来避免 SimpleDB 的问题。解释这种方法的后果。您更喜欢它还是 SimpleDB 的方法？
+
+(d) 阻止恶意客户端独占所有缓冲区的另一种方法是允许每个事务固定不超过缓冲区池的某个百分比（例如，10%）。实现并测试对 SimpleDB 缓冲区管理器的此修改。
+
+**4.14.** 修改 `BufferMgr` 类以实现本章中描述的其他每种替换策略。
+
+**4.15.** 练习 4.4 建议了一种页面替换策略，即优先选择未修改的页面而不是已修改的页面。实现此替换策略。
+
+**4.16.** 练习 4.5 建议了一种页面替换策略，即选择 LSN 最低的已修改页面。实现此策略。
+
+**4.17.** SimpleDB 缓冲区管理器在搜索缓冲区时顺序遍历缓冲区池。当池中有数千个缓冲区时，这种搜索将非常耗时。修改代码，添加数据结构（例如专用列表和哈希表）以提高搜索时间。
+
+**4.18.** 在练习 3.15 中，您被要求编写代码来维护磁盘使用情况的统计信息。扩展此代码以提供缓冲区使用情况的信息。
