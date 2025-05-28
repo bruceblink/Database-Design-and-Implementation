@@ -1,0 +1,10 @@
+{
+    "markdownlint.config": {
+        "MD036": false,
+        "MD033": false,
+        "MD013": false,
+        "MD041": false
+    },
+    "markdown.validate.enabled": false,
+    "markdown.extension.toc.levels": "2..6"
+}

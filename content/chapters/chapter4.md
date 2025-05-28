@@ -321,8 +321,6 @@ class LogIterator implements Iterator<byte[]> {
 
 **图 4.8 访问磁盘块的协议**
 
-------
-
 如果某个客户端当前正在**固定 (pinning)** 一个页面，则称该页面已被**固定 (pinned)**；否则，该页面是**未固定 (unpinned)** 的。缓冲区管理器有义务在页面被固定的时间内，始终为其客户端提供该页面。反之，一旦页面变为未固定状态，缓冲区管理器就可以将其分配给另一个块。
 
 当客户端要求缓冲区管理器将页面固定到某个块时，缓冲区管理器会遇到以下四种情况之一：
@@ -804,7 +802,7 @@ Oracle 的默认缓冲区替换策略是 LRU。然而，在扫描大表时，它
 
 一些研究人员已经研究了如何使缓冲区管理器本身更智能。基本思想是缓冲区管理器可以跟踪每个事务的固定请求。如果它检测到某种模式（例如，事务重复读取文件的相同 N 个块），即使这些页面没有被固定，它也会尝试避免替换这些页面。Ng 等人 (1991) 的文章更详细地描述了这一思想并提供了一些模拟结果。
 
-- Ashdown, L., et al. (2019). Oracle database concepts. Document E96138-01,Oracle Corporation. 可从 <https://docs.oracle.com/en/database/oracle/oracle-database/19/cncpt/database-concepts.pdf> 获取。
+- Ashdown, L., et al. (2019). Oracle database concepts. Document E96138-01,Oracle Corporation. 可从 [Oracle在线文档](https://docs.oracle.com/en/database/oracle/oracle-database/19/cncpt/database-concepts.pdf) 获取。
 - Effelsberg, W., & Haerder, T. (1984). Principles of database buffer management.ACM Transactions on Database Systems, 9(4), 560–595.
 - Gray, J., & Reuter, A. (1993). Transaction processing: concepts and techniques.Morgan Kaufman.
 - Ng, R., Faloutsos, C., & Sellis, T. (1991). Flexible buffer allocation based on marginal gains. Proceedings of the ACM SIGMOD Conference, pp. 387–396.
