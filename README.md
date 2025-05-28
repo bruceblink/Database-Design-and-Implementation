@@ -62,7 +62,7 @@ database-design-and-implementation/
    - 2.5 建议阅读（Suggested Reading）
    - 2.6 习题（Exercises）
 
-3. ###  [ 磁盘与文件管理（Disk and File Management）](content/chapters/chapter3.md#第-3-章-磁盘和文件管理-chapter-3-disk-and-file-management)
+3. ###  [磁盘与文件管理（Disk and File Management）](content/chapters/chapter3.md#第-3-章-磁盘和文件管理-chapter-3-disk-and-file-management)
 
    - 3.1 持久化数据存储（Persistent Data Storage）
    - 3.2 块级磁盘接口（The Block-Level Interface to the Disk）
@@ -143,15 +143,15 @@ database-design-and-implementation/
 
 10. ###   查询规划（Planning）
 
-    - 10.1 验证（Verification）
-    - 10.2 查询树评估成本（The Cost of Evaluating a Query Tree）
-    - 10.3 执行计划（Plans）
-    - 10.4 查询规划（Query Planning）
-    - 10.5 更新规划（Update Planning）
-    - 10.6 SimpleDB 规划器（The SimpleDB Planner）
-    - 10.7 本章小结（Chapter Summary）
-    - 10.8 建议阅读（Suggested Reading）
-    - 10.9 习题（Exercises）
+    - 10.1 验证（Verification）
+    - 10.2 查询树评估成本（The Cost of Evaluating a Query Tree）
+    - 10.3 执行计划（Plans）
+    - 10.4 查询规划（Query Planning）
+    - 10.5 更新规划（Update Planning）
+    - 10.6 SimpleDB 规划器（The SimpleDB Planner）
+    - 10.7 本章小结（Chapter Summary）
+    - 10.8 建议阅读（Suggested Reading）
+    - 10.9 习题（Exercises）
 
 11. ### JDBC 接口（JDBC Interfaces）
 
