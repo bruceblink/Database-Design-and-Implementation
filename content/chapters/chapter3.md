@@ -262,7 +262,6 @@ f.close(); // 关闭文件
 
 **连续分配**是最简单的策略，它将每个文件存储为**连续的块序列**。为了实现连续分配，文件系统目录包含每个文件的长度及其第一个块的位置。将逻辑块引用映射到物理块引用很容易——如果文件从磁盘块 b 开始，那么文件的块 N 位于磁盘块 b+N 中。图 3.8 描绘了包含两个文件的文件系统目录：一个名为“junk”的 48 块长文件，从块 32 开始；一个名为“temp”的 16 块长文件，从块 80 开始。
 
-
 ```txt
 名称   起始块  长度
 junk    32     48
@@ -270,7 +269,6 @@ temp    80     16
 ```
 
 **图 3.8 连续分配的文件系统目录**
-
 
 连续分配有两个问题。第一个问题是，如果文件后面紧跟着另一个文件，则文件无法扩展。图 3.8 中的文件“junk”就是这样的一个例子。因此，客户端必须创建具有其可能需要的最大块数的文件，当文件未满时会导致空间浪费。这个问题被称为**内部碎片 (internal fragmentation)**。第二个问题是，随着磁盘变满，它可能有很多小尺寸的未分配块，但没有大的块。因此，即使磁盘包含大量可用空间，也可能无法创建大文件。这个问题被称为**外部碎片 (external fragmentation)**。
 
@@ -285,7 +283,6 @@ temp    80     16
 
 例如，假设操作系统以 8 块扩展区存储文件。图 3.9 描绘了文件“junk”和“temp”的文件系统目录。这些文件的大小与之前相同，但现在被分割成扩展区。“junk”文件有六个扩展区，“temp”文件有两个扩展区。
 
-
 ```txt
 名称   扩展区
 junk   32, 480, 696, 72, 528, 336
@@ -293,7 +290,6 @@ temp   64, 8
 ```
 
 **图 3.9 基于扩展区分配的文件系统目录**
-
 
 为了找到保存文件块 N 的磁盘块，`seek` 方法在文件系统目录中搜索该文件的扩展区列表；然后它搜索扩展区列表以确定包含块 N 的扩展区，从中可以计算出块的位置。例如，考虑图 3.9 的文件目录。文件“junk”的块 21 的位置可以按如下方式计算：
 
@@ -310,7 +306,6 @@ temp   64, 8
 **索引分配**采取了不同的方法——它甚至不尝试以连续块分配文件。相反，**文件的每个块都单独分配**（如果愿意，可以认为是长度为一的扩展区）。操作系统通过为每个文件分配一个特殊的**索引块 (index block)** 来实现此策略，该索引块跟踪分配给该文件的磁盘块。也就是说，索引块 ib 可以被认为是一个整数数组，其中 ib[N] 的值是保存文件的逻辑块 N 的磁盘块。因此，计算任何逻辑块的位置是微不足道的——您只需在索引块中查找即可。
 
 图 3.10a 描绘了文件“junk”和“temp”的文件系统目录。“junk”的索引块是块 34。图 3.10b 给出了该块的前几个整数。从图中可以很容易地看出，文件“junk”的块 1 位于磁盘的块 103 处。
-
 
 ```txt
 (a)
@@ -330,5 +325,435 @@ temp   439
 
 **图 3.10 索引分配的文件系统目录。(a) 目录表，(b) 索引块 34 的内容**
 
-
 这种方法的优点是块是逐个分配的，因此没有碎片。其主要问题是文件将有一个最大大小，因为它们只能拥有与索引块中值数量一样多的块。UNIX 文件系统通过支持多级索引块来解决这个问题，从而允许最大文件大小非常大。参见练习 3.12 和 3.13。
+
+## 3.4 数据库系统与操作系统 (The Database System and the OS)
+
+操作系统提供了两个级别的磁盘访问支持：块级支持和文件级支持。数据库引擎的实现者应该选择哪个级别呢？
+
+选择使用**块级支持 (block-level support)** 的优点是，引擎可以完全控制哪些磁盘块用于什么目的。例如，经常使用的块可以存储在磁盘中部，从而减少寻道时间。类似地，倾向于一起访问的块可以存储在一起。另一个优点是数据库引擎不受操作系统对文件的限制，从而可以支持比操作系统限制更大或跨多个磁盘驱动器的表。
+
+另一方面，使用块级接口有几个缺点：这种策略实现复杂；它要求磁盘被格式化并作为**裸磁盘 (raw disk)** 挂载，即其块不属于文件系统的磁盘；并且它要求数据库管理员对块访问模式有广泛的了解才能微调系统。
+
+另一个极端是数据库引擎尽可能使用操作系统**文件系统 (OS file system)**。例如，每个表都可以存储在一个单独的文件中，并且引擎使用文件级操作访问记录。这种策略实现起来容易得多，并且它允许操作系统向数据库系统隐藏实际的磁盘访问。但这种情况是不可接受的，原因有二：首先，数据库系统需要知道**块边界 (block boundaries)** 在哪里，以便它可以有效地组织和检索数据。其次，数据库系统需要管理自己的页面，因为操作系统管理 I/O 缓冲区的方式不适用于数据库查询。
+
+您将在后续章节中遇到这些问题。
+
+一个折衷的策略是，数据库系统将其所有数据存储在一个或多个操作系统文件中，但将这些文件视为**裸磁盘**。也就是说，数据库系统使用**逻辑文件块 (logical file blocks)** 访问其“磁盘”。操作系统负责通过 `seek` 方法将每个逻辑块引用映射到其对应的物理块。由于 `seek` 在检查文件系统目录时可能会产生磁盘访问，因此数据库系统将无法完全控制磁盘。然而，这些额外的块通常与数据库系统访问的大量块相比微不足道。因此，数据库系统能够使用操作系统的高级接口，同时保持对磁盘访问的显著控制。
+
+许多数据库系统都使用了这种折衷策略。Microsoft Access 将所有内容保存在单个 `.mdb` 文件中，而 Oracle、Derby 和 SimpleDB 使用多个文件。
+
+## 3.5 SimpleDB 文件管理器 (The SimpleDB File Manager)
+
+数据库引擎中与操作系统交互的部分称为**文件管理器 (file manager)**。本节将探讨 SimpleDB 的文件管理器。第 3.5.1 节探讨客户端如何使用文件管理器；第 3.5.2 节探讨其实现。
+
+### 3.5.1 使用文件管理器 (Using the File Manager)
+
+一个 SimpleDB 数据库存储在多个文件中。每个表和每个索引都有一个文件，还有一个日志文件和几个目录文件。SimpleDB 文件管理器通过 `simpledb.file` 包提供对这些文件的**块级访问 (block-level access)**。此包公开了三个类：`BlockId`、`Page` 和 `FileMgr`。它们的 API 如 图 3.11 所示。
+
+```java
+// BlockId 类：标识一个特定的块，通过文件名和逻辑块号
+public class BlockId {
+    // 构造函数：创建 BlockId 对象
+    public BlockId(String filename, int blknum);
+
+    // 返回文件名
+    public String filename();
+
+    // 返回块号
+    public int number();
+}
+
+// Page 类：存储磁盘块的内容
+public class Page {
+    // 构造函数：创建一个页面，其内存来自操作系统 I/O 缓冲区
+    public Page(int blocksize);
+
+    // 构造函数：创建一个页面，其内存来自 Java 数组
+    public Page(byte[] b);
+
+    // 从指定偏移量读取一个整数
+    public int getInt(int offset);
+
+    // 从指定偏移量读取字节数组 (blob)
+    public byte[] getBytes(int offset);
+
+    // 从指定偏移量读取一个字符串
+    public String getString(int offset);
+
+    // 在指定偏移量写入一个整数
+    public void setInt(int offset, int val);
+
+    // 在指定偏移量写入字节数组 (blob)
+    public void setBytes(int offset, byte[] val);
+
+    // 在指定偏移量写入一个字符串
+    public void setString(int offset, String val);
+
+    // 计算给定字符串长度在页面中所需的字节数
+    public int maxLength(int strlen);
+}
+
+// FileMgr 类：处理与操作系统文件系统的实际交互
+public class FileMgr {
+    // 构造函数：初始化文件管理器
+    public FileMgr(String dbDirectory, int blocksize);
+
+    // 将指定块的内容读取到指定页面中
+    public void read(BlockId blk, Page p);
+
+    // 将页面的内容写入指定块
+    public void write(BlockId blk, Page p);
+
+    // 将新块追加到指定文件的末尾，并返回新块的 BlockId
+    public BlockId append(String filename);
+
+    // 检查数据库目录是否是新建的
+    public boolean isNew();
+
+    // 返回指定文件中的块数
+    public int length(String filename);
+
+    // 返回块大小
+    public int blockSize();
+}
+```
+
+**图 3.11 SimpleDB 文件管理器的 API**
+
+例如，语句 `BlockId blk = new BlockId("student.tbl", 23)` 创建了一个指向文件 `student.tbl` 中块 23 的引用。`filename` 和 `number` 方法返回其文件名和块号。
+`Page` 对象保存磁盘块的内容。它的第一个构造函数创建一个从操作系统 I/O 缓冲区获取内存的页面；这个构造函数由缓冲区管理器使用。它的第二个构造函数创建一个从 Java 数组获取内存的页面；这个构造函数主要由日志管理器使用。各种 `get` 和 `set` 方法使客户端能够在页面的指定位置存储或访问值。一个页面可以保存三种值类型：整数、字符串和“大对象 (blobs)”（即任意字节数组）。如果需要，可以添加相应的方法来支持其他类型；参见练习 3.17。客户端可以在页面的任何偏移量处存储值，但负责知道哪些值存储在哪里。试图从错误的偏移量获取值将导致不可预测的结果。
+
+`FileMgr` 类处理与操作系统文件系统的实际交互。它的构造函数接受两个参数：一个表示数据库名称的字符串和一个表示每个块大小的整数。数据库名称用作包含数据库文件的文件夹的名称；此文件夹位于引擎的当前目录中。如果不存在此类文件夹，则为新数据库创建一个文件夹。`isNew` 方法在这种情况下返回 `true`，否则返回 `false`。此方法对于新数据库的正确初始化是必需的。
+
+`read` 方法将指定块的内容读入指定页面。`write` 方法执行相反的操作，将页面的内容写入指定块。`length` 方法返回指定文件中的块数。
+
+引擎有一个 `FileMgr` 对象，它在系统启动时创建。`SimpleDB` 类（在 `simpledb.server` 包中）创建该对象，其 `fileMgr` 方法返回创建的对象。
+
+图 3.12 中的 `FileTest` 类说明了这些方法的使用。这段代码有三个部分。第一部分初始化 `SimpleDB` 对象；这三个参数指定引擎应该使用名为“studentdb”的数据库，使用 400 字节的块和 8 个缓冲区的池。400 字节的块大小是 SimpleDB 的默认值。它被人为地设置得很小，以便您可以轻松创建包含大量块的演示数据库。在商业数据库系统中，此值将设置为操作系统定义的块大小；典型的块大小为 4K 字节。缓冲区池将在第 4 章中讨论。
+
+图 3.12 的第二部分在文件“testfile”的第二个块的偏移量 88 处写入字符串“abcdefghijklm”。然后它调用 `maxLength` 方法来确定字符串的最大长度，以便它可以确定字符串后面的位置。然后它将整数 345 写入该位置。
+
+第三部分将此块读入另一个页面并从中提取这两个值。
+
+```java
+import java.io.IOException; // 导入 IOException 异常
+
+public class FileTest {
+    public static void main(String[] args) throws IOException { // main 方法声明抛出 IOException
+        // 第一部分：初始化 SimpleDB 对象
+        // 创建一个 SimpleDB 实例，数据库目录名为 "filetest"，块大小 400 字节，缓冲区池大小 8
+        SimpleDB db = new SimpleDB("filetest", 400, 8);
+        FileMgr fm = db.fileMgr(); // 获取文件管理器实例
+
+        // 第二部分：写入数据到文件
+        BlockId blk = new BlockId("testfile", 2); // 标识文件 "testfile" 的逻辑块 2
+        Page p1 = new Page(fm.blockSize()); // 创建一个页面，大小与文件管理器定义的块大小相同
+
+        int pos1 = 88; // 写入字符串的起始偏移量
+        p1.setString(pos1, "abcdefghijklm"); // 在页面 p1 的 pos1 处写入字符串 "abcdefghijklm"
+
+        // 计算字符串写入后占用的最大长度，以便确定下一个值的写入位置
+        int size = Page.maxLength("abcdefghijklm".length());
+        int pos2 = pos1 + size; // 整数的写入位置
+
+        p1.setInt(pos2, 345); // 在页面 p1 的 pos2 处写入整数 345
+
+        fm.write(blk, p1); // 将页面 p1 的内容写入到文件 "testfile" 的块 2
+
+        // 第三部分：从文件读取数据并打印
+        Page p2 = new Page(fm.blockSize()); // 创建另一个页面用于读取
+        fm.read(blk, p2); // 从文件 "testfile" 的块 2 读取内容到页面 p2
+
+        // 从页面 p2 中提取并打印写入的整数和字符串
+        System.out.println("偏移量 " + pos2 + " 包含 " + p2.getInt(pos2));
+        System.out.println("偏移量 " + pos1 + " 包含 " + p2.getString(pos1));
+    }
+}
+```
+
+**图 3.12 测试 SimpleDB 文件管理器**
+
+### 3.5.2 实现文件管理器 (Implementing the File Manager)
+
+本小节将探讨三个文件管理器类的实现。
+
+#### `BlockId` 类
+
+`BlockId` 类的代码如 图 3.13 所示。除了对 `fileName` 和 `number` 方法的直接实现之外，该类还实现了 `equals`、`hashCode` 和 `toString` 方法。
+
+```java
+public class BlockId {
+    private String filename; // 文件名
+    private int blknum;      // 块号
+
+    // 构造函数
+    public BlockId(String filename, int blknum) {
+        this.filename = filename;
+        this.blknum = blknum;
+    }
+
+    // 返回文件名
+    public String fileName() {
+        return filename;
+    }
+
+    // 返回块号
+    public int number() {
+        return blknum;
+    }
+
+    // 重写 equals 方法，用于比较两个 BlockId 对象是否相等
+    @Override
+    public boolean equals(Object obj) {
+        // 如果 obj 不是 BlockId 的实例，直接返回 false
+        if (this == obj) return true;
+        if (obj == null || getClass() != obj.getClass()) return false;
+
+        BlockId blk = (BlockId) obj; // 将 obj 强制转换为 BlockId
+        // 比较文件名和块号是否都相等
+        return filename.equals(blk.filename) && blknum == blk.blknum;
+    }
+
+    // 重写 toString 方法，返回 BlockId 的字符串表示
+    @Override
+    public String toString() {
+        return "[file " + filename + ", block " + blknum + "]";
+    }
+
+    // 重写 hashCode 方法，用于散列集合中的键
+    @Override
+    public int hashCode() {
+        // 使用 toString() 的 hashCode 作为 BlockId 的 hashCode
+        return toString().hashCode();
+    }
+}
+```
+
+**图 3.13 SimpleDB 类 BlockId 的代码**
+
+#### `Page` 类
+
+`Page` 类的实现代码如 图 3.14 所示。每个页面都使用 **Java `ByteBuffer` 对象**来实现。`ByteBuffer` 对象用方法包装了一个字节数组，这些方法可以在数组的任意位置读写值。这些值可以是基本类型（如整数）以及较小的字节数组。例如，`Page` 的 `setInt` 方法通过调用 `ByteBuffer` 的 `putInt` 方法将一个整数保存到页面中。`Page` 的 `setBytes` 方法将一个 Blob 保存为两个值：首先是指定 Blob 的字节数，然后是字节本身。它调用 `ByteBuffer` 的 `putInt` 方法来写入整数，并调用 `put` 方法来写入字节。
+
+`ByteBuffer` 类没有读取和写入字符串的方法，因此 `Page` 选择将字符串值作为 Blob 写入。Java 的 `String` 类有一个 `getBytes` 方法，它将字符串转换为字节数组；它还有一个构造函数可以将字节数组转换回字符串。因此，`Page` 的 `setString` 方法调用 `getBytes` 将字符串转换为字节，然后将这些字节作为 Blob 写入。类似地，`Page` 的 `getString` 方法从字节缓冲区读取一个 Blob，然后将字节转换为字符串。
+
+字符串与其字节表示之间的转换由**字符编码 (character encoding)** 决定。存在几种标准编码，例如 ASCII 和 Unicode-16。Java 的 `Charset` 类包含实现了许多这些编码的对象。`String` 的构造函数及其 `getBytes` 方法接受一个 `Charset` 参数。在图 3.14 中，您可以看到 `Page` 使用 ASCII 编码，但您可以更改 `CHARSET` 常量以获得您偏好的编码。
+
+一个字符集决定了每个字符编码成多少字节。ASCII 每个字符使用一个字节，而 Unicode-16 每个字符使用 2 到 4 个字节。因此，数据库引擎可能无法确切知道给定字符串将编码成多少字节。`Page` 的 `maxLength` 方法计算具有指定字符数的字符串的 Blob 的最大大小。它通过将字符数乘以每个字符的最大字节数，并加上与字节一起写入的整数所需的 4 个字节来实现。
+
+```java
+import java.nio.ByteBuffer;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+
+public class Page {
+    private ByteBuffer bb; // underlying ByteBuffer for the page's content
+    // Defines the character set used for string conversions. US_ASCII is 1 byte per character.
+    public static final Charset CHARSET = StandardCharsets.US_ASCII;
+
+    // Constructor for creating data buffers managed by the buffer manager.
+    // Allocates a direct ByteBuffer for efficient I/O.
+    public Page(int blocksize) {
+        bb = ByteBuffer.allocateDirect(blocksize);
+    }
+
+    // Constructor for creating log pages or other pages from an existing byte array.
+    // Wraps a given byte array with a ByteBuffer.
+    public Page(byte[] b) {
+        bb = ByteBuffer.wrap(b);
+    }
+
+    // Reads an integer from the specified offset in the page.
+    public int getInt(int offset) {
+        return bb.getInt(offset);
+    }
+
+    // Writes an integer to the specified offset in the page.
+    public void setInt(int offset, int n) {
+        bb.putInt(offset, n);
+    }
+
+    // Reads a byte array (blob) from the specified offset.
+    // First reads the length of the blob (an integer), then the bytes themselves.
+    public byte[] getBytes(int offset) {
+        bb.position(offset); // Set the buffer's position to the offset
+        int length = bb.getInt(); // Read the length of the byte array
+        byte[] b = new byte[length]; // Create a byte array of that length
+        bb.get(b); // Read the bytes into the array
+        return b;
+    }
+
+    // Writes a byte array (blob) to the specified offset.
+    // First writes the length of the byte array (as an integer), then the bytes.
+    public void setBytes(int offset, byte[] b) {
+        bb.position(offset); // Set the buffer's position to the offset
+        bb.putInt(b.length); // Write the length of the byte array
+        bb.put(b); // Write the byte array itself
+    }
+
+    // Reads a string from the specified offset by first reading it as a byte array (blob),
+    // then converting the byte array to a string using the defined CHARSET.
+    public String getString(int offset) {
+        byte[] b = getBytes(offset); // Get the byte array representation of the string
+        return new String(b, CHARSET); // Convert bytes to a String using the specified charset
+    }
+
+    // Writes a string to the specified offset by first converting it to a byte array (blob)
+    // using the defined CHARSET, then writing the byte array.
+    public void setString(int offset, String s) {
+        byte[] b = s.getBytes(CHARSET); // Convert the string to a byte array
+        setBytes(offset, b); // Write the byte array as a blob
+    }
+
+    // Calculates the maximum number of bytes a string of a given character length
+    // will occupy on the page. Accounts for the integer storing the length of the string
+    // and the bytes per character in the chosen CHARSET.
+    public static int maxLength(int strlen) {
+        float bytesPerChar = CHARSET.newEncoder().maxBytesPerChar();
+        return Integer.BYTES + (strlen * (int) bytesPerChar); // 4 bytes for length + (char_length * max_bytes_per_char)
+    }
+
+    // Package-private method to expose the underlying ByteBuffer.
+    // Used by FileMgr to perform actual disk I/O. Resets position to 0.
+    ByteBuffer contents() {
+        bb.position(0); // Reset buffer position to 0 before returning
+        return bb;
+    }
+}
+```
+
+**图 3.14 SimpleDB 类 Page 的代码**
+
+作为 `ByteBuffer` 对象基础的字节数组可以来自 Java 数组或操作系统的 I/O 缓冲区。`Page` 类有两个构造函数，每个都对应不同类型的底层字节数组。由于 I/O 缓冲区是宝贵的资源，第一个构造函数的使用由缓冲区管理器严格控制，并将在下一章中讨论。数据库引擎的其他组件（如日志管理器）使用另一个构造函数。
+
+#### `FileMgr` 类
+
+`FileMgr` 类的代码如 图 3.15 所示。它的主要工作是实现将页面读写到磁盘块的方法。它的 `read` 方法**定位到指定文件的适当位置**，并将该块的内容读取到指定页面的字节缓冲区中。`write` 方法类似。`append` 方法**定位到文件末尾**并向其写入一个空字节数组，这会使操作系统自动扩展文件。请注意文件管理器总是从文件中读取或写入**块大小的字节数**，并且总是在**块边界**处。通过这样做，文件管理器确保每次调用 `read`、`write` 或 `append` 都将精确地产生**一次磁盘访问**。
+
+`openFiles` 映射中的每个 `RandomAccessFile` 对象都对应一个打开的文件。请注意，文件是以“rws”模式打开的。“rw”部分指定文件为读写模式。“s”部分指定操作系统不应延迟磁盘 I/O 以优化磁盘性能；相反，**每个写入操作必须立即写入磁盘**。此功能确保数据库引擎确切知道何时发生磁盘写入，这对于实现第 5 章的数据恢复算法尤为重要。
+
+`read`、`write` 和 `append` 方法是**同步的 (synchronized)**，这意味着一次只有一个线程可以执行它们。当方法共享可更新对象（例如 `RandomAccessFile` 对象）时，需要同步以保持一致性。例如，如果 `read` 未同步，可能会发生以下场景：假设两个 JDBC 客户端，每个都在自己的线程中运行，试图从同一个文件读取不同的块。线程 A 首先运行。它开始执行 `read`，但在调用 `f.seek` 后立即被中断，即它已经设置了文件位置但尚未从中读取。线程 B 接下来运行并完成 `read`。当线程 A 恢复时，文件位置已经改变，但线程不会注意到它；因此，它将错误地从错误的块读取。
+
+SimpleDB 中只有一个 `FileMgr` 对象，它由 `simpledb.server` 包中的 `SimpleDB` 构造函数创建。`FileMgr` 构造函数确定指定的数据库文件夹是否存在，并在必要时创建它。构造函数还会删除可能由第 14 章的物化操作符创建的任何临时文件。
+
+```java
+import java.io.File;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.util.HashMap;
+import java.util.Map;
+import java.nio.ByteBuffer; // Added as per the provided code snippet where Page uses ByteBuffer
+
+public class FileMgr {
+    private File dbDirectory; // 数据库文件存储的目录
+    private int blocksize;   // 每个块的大小
+    private boolean isNew;   // 标记数据库是否是新建的
+    // Map to hold open RandomAccessFile objects for each filename.
+    private Map<String, RandomAccessFile> openFiles = new HashMap<>();
+
+    // Constructor for FileMgr.
+    // It initializes the database directory, block size, and checks if it's a new database.
+    // It also cleans up any temporary files if the database is new.
+    public FileMgr(String dbDirectoryName, int blocksize) {
+        this.dbDirectory = new File(dbDirectoryName);
+        this.blocksize = blocksize;
+        isNew = !dbDirectory.exists(); // If directory doesn't exist, it's a new database
+
+        // If it's a new database, create the directory; otherwise, clean up existing temp files.
+        if (isNew) {
+            dbDirectory.mkdirs(); // Create the directory (and any necessary parent directories)
+        } else {
+            // Remove any temporary files (those starting with "temp")
+            for (String filename : dbDirectory.list()) {
+                if (filename.startsWith("temp")) {
+                    new File(dbDirectory, filename).delete();
+                }
+            }
+        }
+    }
+
+    // Synchronized method to read a block from disk into a Page object.
+    // Ensures thread safety for file access.
+    public synchronized void read(BlockId blk, Page p) {
+        try {
+            RandomAccessFile f = getFile(blk.fileName()); // Get the RandomAccessFile for the block's file
+            // Seek to the start of the specified block within the file.
+            // Block position is block number * block size.
+            f.seek(blk.number() * blocksize);
+            // Read the block's content into the ByteBuffer of the Page.
+            // The Page's contents() method returns the ByteBuffer at position 0.
+            f.getChannel().read(p.contents());
+        } catch (IOException e) {
+            throw new RuntimeException("cannot read block " + blk + ": " + e.getMessage());
+        }
+    }
+
+    // Synchronized method to write the content of a Page object to a block on disk.
+    // Ensures thread safety for file access.
+    public synchronized void write(BlockId blk, Page p) {
+        try {
+            RandomAccessFile f = getFile(blk.fileName()); // Get the RandomAccessFile for the block's file
+            // Seek to the start of the specified block within the file.
+            f.seek(blk.number() * blocksize);
+            // Write the Page's content from its ByteBuffer to the file.
+            f.getChannel().write(p.contents());
+        } catch (IOException e) {
+            throw new RuntimeException("cannot write block " + blk + ": " + e.getMessage());
+        }
+    }
+
+    // Synchronized method to append a new, empty block to the end of a file.
+    // This implicitly extends the file on disk.
+    public synchronized BlockId append(String filename) {
+        int newblknum = length(filename); // The new block number will be the current file length
+        BlockId blk = new BlockId(filename, newblknum); // Create a BlockId for the new block
+        try {
+            RandomAccessFile f = getFile(blk.fileName()); // Get the RandomAccessFile for the file
+            // Seek to the end of the file.
+            f.seek(blk.number() * blocksize);
+            // Write an empty byte array of blocksize to extend the file.
+            byte[] b = new byte[blocksize];
+            f.write(b);
+        } catch (IOException e) {
+            throw new RuntimeException("cannot append block " + blk + ": " + e.getMessage());
+        }
+        return blk; // Return the BlockId of the newly appended block
+    }
+
+    // Returns whether this is a new database (directory was just created).
+    public boolean isNew() {
+        return isNew;
+    }
+
+    // Returns the number of blocks in the specified file.
+    public int length(String filename) {
+        try {
+            RandomAccessFile f = getFile(filename); // Get the RandomAccessFile for the file
+            // Calculate length by dividing total file size by block size.
+            return (int) (f.length() / blocksize);
+        } catch (IOException e) {
+            throw new RuntimeException("cannot access file " + filename + ": " + e.getMessage());
+        }
+    }
+
+    // Returns the block size configured for this file manager.
+    public int blockSize() {
+        return blocksize;
+    }
+
+    // Helper method to get an open RandomAccessFile for a given filename.
+    // If the file is not already open, it opens it in "rws" mode and stores it in the map.
+    private RandomAccessFile getFile(String filename) throws IOException {
+        RandomAccessFile f = openFiles.get(filename);
+        if (f == null) {
+            // "rws" mode: read/write, and synchronous writes to disk (no OS buffering)
+            f = new RandomAccessFile(new File(dbDirectory, filename), "rws");
+            openFiles.put(filename, f);
+        }
+        return f;
+    }
+}
+```
+
+**图 3.15 SimpleDB 类 FileMgr 的代码**
