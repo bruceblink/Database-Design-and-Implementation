@@ -757,3 +757,278 @@ public class FileMgr {
 ```
 
 **图 3.15 SimpleDB 类 FileMgr 的代码**
+
+## 3.6 本章总结 (Chapter Summary)
+
+- **磁盘驱动器 (disk drive)** 包含一个或多个旋转的**盘片 (platters)**。每个盘片都有同心**磁道 (tracks)**，每个磁道由**扇区 (sectors)** 组成。扇区的大小由磁盘制造商决定；常见的扇区大小是 512 字节。
+
+```java
+public class FileMgr {
+    private File dbDirectory; // 数据库文件存储的目录
+    private int blocksize;   // 每个块的大小
+    private boolean isNew;   // 标记数据库是否是新建的
+    // 存储已打开的 RandomAccessFile 对象的映射
+    private Map<String, RandomAccessFile> openFiles = new HashMap<>();
+
+    // 构造函数：初始化文件管理器
+    public FileMgr(File dbDirectory, int blocksize) {
+        this.dbDirectory = dbDirectory; // 设置数据库目录
+        this.blocksize = blocksize;     // 设置块大小
+        isNew = !dbDirectory.exists();  // 检查目录是否存在以确定是否为新数据库
+
+        // 如果是新数据库，则创建目录
+        if (isNew)
+            dbDirectory.mkdirs();
+
+        // 移除任何遗留的临时表文件 (以 "temp" 开头的文件)
+        for (String filename : dbDirectory.list())
+            if (filename.startsWith("temp"))
+                new File(dbDirectory, filename).delete();
+    }
+
+    // 同步方法：从磁盘读取一个块到 Page 对象
+    public synchronized void read(BlockId blk, Page p) {
+        try {
+            RandomAccessFile f = getFile(blk.fileName()); // 获取对应的 RandomAccessFile
+            f.seek(blk.number() * blocksize);             // 定位到块的起始位置
+            f.getChannel().read(p.contents());            // 将数据读取到 Page 的 ByteBuffer 中
+        } catch (IOException e) {
+            throw new RuntimeException("无法读取块 " + blk); // 抛出运行时异常
+        }
+    }
+
+    // 同步方法：将 Page 对象的内容写入磁盘上的一个块
+    public synchronized void write(BlockId blk, Page p) {
+        try {
+            RandomAccessFile f = getFile(blk.fileName()); // 获取对应的 RandomAccessFile
+            f.seek(blk.number() * blocksize);             // 定位到块的起始位置
+            f.getChannel().write(p.contents());           // 将 Page 的 ByteBuffer 内容写入文件
+        } catch (IOException e) {
+            throw new RuntimeException("无法写入块" + blk); // 抛出运行时异常
+        }
+    }
+
+    // 同步方法：向文件末尾追加一个新的空块
+    public synchronized BlockId append(String filename) {
+        int newblknum = length(filename); // 新块的块号将是当前文件的长度 (块数)
+        BlockId blk = new BlockId(filename, newblknum); // 创建新块的 BlockId
+        byte[] b = new byte[blocksize]; // 创建一个空字节数组 (块大小)
+        try {
+            RandomAccessFile f = getFile(blk.fileName()); // 获取对应的 RandomAccessFile
+            f.seek(blk.number() * blocksize);             // 定位到文件末尾 (新块的起始位置)
+            f.write(b);                                   // 写入空字节数组以扩展文件
+        } catch (IOException e) {
+            throw new RuntimeException("无法追加块" + blk); // 抛出运行时异常
+        }
+        return blk; // 返回新追加块的 BlockId
+    }
+
+    // 返回指定文件中块的数量
+    public int length(String filename) {
+        try {
+            RandomAccessFile f = getFile(filename);     // 获取对应的 RandomAccessFile
+            return (int) (f.length() / blocksize);      // 文件总长度除以块大小得到块数
+        } catch (IOException e) {
+            throw new RuntimeException("无法访问文件 " + filename); // 抛出运行时异常
+        }
+    }
+
+    // 返回数据库是否是新建的
+    public boolean isNew() {
+        return isNew;
+    }
+
+    // 返回当前配置的块大小
+    public int blockSize() {
+        return blocksize;
+    }
+
+    // 辅助方法：获取或打开一个 RandomAccessFile 对象
+    private RandomAccessFile getFile(String filename) throws IOException {
+        RandomAccessFile f = openFiles.get(filename); // 尝试从映射中获取文件
+        if (f == null) { // 如果文件尚未打开
+            File dbTable = new File(dbDirectory, filename); // 创建文件对象
+            // 以 "rws" 模式打开文件：读写，并确保每次写入都立即同步到磁盘
+            f = new RandomAccessFile(dbTable, "rws");
+            openFiles.put(filename, f); // 将打开的文件添加到映射中
+        }
+        return f; // 返回 RandomAccessFile 对象
+    }
+}
+```
+
+**图 3.15 SimpleDB 类 FileMgr 的代码**
+
+- 每个盘片都有自己的读/写**磁头 (read/write head)**。这些磁头不能独立移动；相反，它们都连接到一个单独的**执行器 (actuator)**，执行器同时将它们移动到每个盘片上的同一磁道。
+
+- 磁盘驱动器执行一次
+
+  磁盘访问 (disk access)
+
+   分为三个阶段：
+
+  - 执行器将磁盘磁头移动到指定的磁道。这个时间称为**寻道时间 (seek time)**。
+  - 驱动器等待盘片旋转，直到第一个所需的字节位于磁头下方。这个时间称为**旋转延迟 (rotational delay)**。
+  - 位于磁头下方旋转的字节被读取（或写入）。这个时间称为**传输时间 (transfer time)**。
+
+- 磁盘驱动器速度慢是因为它们的活动是机械的。访问时间可以通过使用**磁盘缓存 (disk caches)**、**柱面 (cylinders)** 和**磁盘条带化 (disk striping)** 来改善。磁盘缓存允许磁盘通过一次读取整个磁道来预取扇区。**柱面**由每个盘片上具有相同磁道号的磁道组成。同一柱面上的块可以无需额外寻道时间即可访问。**磁盘条带化**将虚拟磁盘的内容分布到多个小磁盘上。速度提升是因为小磁盘可以同时操作。
+
+- RAID 技术 (RAID techniques)
+
+   可以用于提高磁盘可靠性。基本的 RAID 级别是：
+
+  - **RAID-0** 是条带化，没有额外的可靠性。如果一个磁盘发生故障，整个数据库实际上就毁了。
+  - **RAID-1** 在条带化磁盘中增加了**镜像 (mirroring)**。每个磁盘都有一个相同的镜像磁盘。如果一个磁盘发生故障，它的镜像可以用来重建它。
+  - **RAID-4** 使用条带化，并额外增加一个磁盘来保存**冗余奇偶校验信息 (redundant parity information)**。如果一个磁盘发生故障，其内容可以通过将其他磁盘上的信息与奇偶校验磁盘结合来重建。
+
+- RAID 技术需要一个**控制器 (controller)** 来向操作系统隐藏多个磁盘的存在，并提供一个**单一的、虚拟的磁盘 (single, virtual disk)** 的错觉。控制器将每个虚拟读/写操作映射到一个或多个底层磁盘上的操作。
+
+- 磁盘技术正受到**闪存 (flash memory)** 的挑战。闪存是持久的，但由于它是完全电子的，因此比磁盘快。然而，由于闪存仍比 RAM 慢得多，操作系统将闪存驱动器与磁盘驱动器同样对待。
+
+- 操作系统通过提供**基于块的接口 (block-based interface)** 来隐藏磁盘和闪存驱动器的物理细节。**块 (block)** 类似于扇区，只是它的大小是操作系统定义的。客户端通过块号访问设备的内容。操作系统通过使用**磁盘映射**或**空闲列表**来跟踪磁盘上哪些块可用于分配。
+
+- **页面 (page)** 是内存中一个块大小的区域。客户端通过将块的内容读入页面，修改页面，然后将页面写回块来修改块。
+
+- 操作系统还提供了**文件级接口 (file-level interface)** 到磁盘。客户端将文件视为**命名的字节序列**。
+
+- 操作系统可以使用**连续分配 (contiguous allocation)**、**基于扩展区分配 (extent-based allocation)** 或**索引分配 (indexed allocation)** 来实现文件。连续分配将每个文件存储为连续的块序列。基于扩展区分配将文件存储为扩展区序列，其中每个扩展区是连续的块块。索引分配单独分配文件的每个块。每个文件都带有一个特殊的索引块，用于跟踪分配给该文件的磁盘块。
+
+- 数据库系统可以选择使用磁盘的块级接口或文件级接口。一个好的折衷方案是将数据存储在文件中，但以块级访问文件。
+
+## 3.7 建议阅读 (Suggested Reading)
+
+Chen 等人 (1994) 的文章详细调查了各种 RAID 策略及其性能特征。一本讨论基于 UNIX 文件系统的好书是 von Hagen (2002)，而讨论 Windows NTFS 的是 Nagar (1997)。许多操作系统教科书，如 Silberschatz 等人 (2004)，都提供了各种文件系统实现的简要概述。1
+
+
+
+闪存具有以下特性：覆盖现有值比写入全新值慢得多。因此，针对基于闪存的文件系统进行了大量研究，这些文件系统不覆盖值。此类文件系统将更新存储在日志中，类似于第 4 章的日志。Wu 和 Kuo (2006) 以及 Lee 和 Moon (2007) 的文章探讨了这些问题。
+
+- Chen, P., Lee, E., Gibson, G., & Patterson, D. (1994) RAID: High-performance, reliable secondary storage.2
+
+   ACM Computing Surveys, 26(2), 145–185.
+
+- Lee, S., & Moon, B. (2007) Design of flash-based DBMS: An in-page logging approach.3
+
+   Proceedings of the ACM-SIGMOD Conference, pp. 55–66.
+
+- Nagar, R. (1997) Windows NT file system internals.4
+
+   O’Reilly.
+
+- Silberschatz, A., Gagne, G., & Galvin, P. (2004) Operating system concepts.5
+
+   Addison Wesley.
+
+- von Hagen, W. (2002) Linux filesystems.6
+
+   Sams Publishing.
+
+- Wu, C., & Kuo, T. (2006) The design of efficient initialization and crash recovery for log-based file systems over flash memory.7
+
+   ACM Transactions on Storage, 2(4), 449–467.
+
+## 3.8 练习 (Exercises)
+
+#### 概念性练习 (Conceptual Exercises)
+
+3.1. 考虑一个包含 50,000 个磁道且以 7200 rpm 旋转的单盘片磁盘。每个磁道包含 500 个扇区，每个扇区包含 512 字节。
+
+(a) 盘片的容量是多少？
+
+(b) 平均旋转延迟是多少？
+
+(c) 最大传输速率是多少？
+
+3.2. 考虑一个 80 GB 的磁盘驱动器，以 7200 rpm 旋转，传输速率为 100 MB/s。假设每个磁道包含相同数量的字节。
+
+(a) 每个磁道包含多少字节？磁盘包含多少个磁道？
+
+(b) 如果磁盘以 10,000 rpm 旋转，传输速率会是多少？
+
+3.3. 假设您有 10 个 20 GB 的磁盘驱动器，每个驱动器每个磁道有 500 个扇区。假设您想通过条带化这些小磁盘来创建一个 200 GB 的虚拟驱动器，每个条带的大小是整个磁道而不是单个扇区。
+
+(a) 假设控制器收到一个虚拟扇区 M 的请求。给出计算相应实际驱动器和扇区号的公式。
+
+(b) 给出磁道大小的条带可能比扇区大小的条带更高效的理由。
+
+(c) 给出磁道大小的条带可能比扇区大小的条带效率更低的理由。
+
+3.4. 本章讨论的所有故障恢复过程都要求在更换故障磁盘时系统必须关闭。许多系统无法忍受任何停机时间，但它们也不想丢失数据。
+
+(a) 考虑基本的镜像策略。给出在不停机的情况下恢复故障镜像的算法。您的算法会增加第二次磁盘故障的风险吗？应该如何做才能降低这种风险？
+
+(b) 类似地修改奇偶校验策略以消除停机时间。您如何处理第二次磁盘故障的风险？
+
+3.5. RAID-4 奇偶校验策略的一个结果是，每次磁盘写入操作都会访问奇偶校验磁盘。一个建议的改进是省略奇偶校验磁盘，而是用奇偶校验信息“条带化”数据磁盘。例如，磁盘 0 的扇区 0、N、2N 等将包含奇偶校验信息，磁盘 1 的扇区 1、N+1、2N+1 等也将包含奇偶校验信息，依此类推。这种改进称为 RAID-5。
+
+(a) 假设一个磁盘发生故障。解释它将如何恢复。
+
+(b) 证明通过这种改进，磁盘读写仍然需要与 RAID-4 相同数量的磁盘访问。
+
+(c) 解释为什么这种改进仍然导致更高效的磁盘访问。
+
+**3.6.** 考虑图 3.5，并假设其中一个条带化磁盘发生故障。展示如何使用奇偶校验磁盘重建其内容。
+
+3.7. 考虑一个 1 GB 的数据库，存储在一个块大小为 4K 字节的文件中。
+
+(a) 文件将包含多少个块？
+
+(b) 假设数据库系统使用磁盘映射来管理其空闲块。需要多少额外的块来保存磁盘映射？
+
+3.8. 考虑图 3.6。在执行以下操作后，绘制磁盘映射和空闲列表的图示：
+
+allocate(1,4); allocate(4,10); allocate(5,12);
+
+**3.9.** 图 3.16 描绘了一个 RAID-4 系统，其中一个磁盘发生故障。使用奇偶校验磁盘重建其值。
+
+![fig3-16](/images/chapter3/fig3-16.png)
+
+3.10. 空闲列表分配策略最终可能在空闲列表中出现两个连续的块。
+
+(a) 解释如何修改空闲列表技术，以便可以合并连续的块。
+
+(b) 解释为什么当文件连续分配时，合并未分配的块是一个好主意。
+
+(c) 解释为什么合并对于基于扩展区或索引的文件分配不重要。
+
+3.11. 假设操作系统使用基于扩展区的文件分配，扩展区大小为 12，并且文件的扩展区列表是 [240, 132, 60, 252, 12, 24]。
+
+(a) 文件的大小是多少？
+
+(b) 计算文件的逻辑块 2、12、23、34 和 55 的物理磁盘块。
+
+**3.12.** 考虑使用索引文件分配的文件实现。假设块大小为 4K 字节，最大可能的文件大小是多少？
+
+3.13. 在 UNIX 中，文件的目录项指向一个名为 inode 的块。在 inode 的一个实现中，块的开头包含各种头部信息，其最后 60 字节包含 15 个整数。其中前 12 个整数是文件中前 12 个数据块的物理位置。接下来的两个整数是两个索引块的位置，最后一个整数是双索引块的位置。一个索引块完全由文件中下一个数据块的块号组成；一个双索引块完全由索引块的块号组成（其内容指向数据块）。
+
+(a) 再次假设块大小为 4K 字节，一个索引块引用多少个数据块？
+
+(b) 忽略双索引块，UNIX 最大可能的文件大小是多少？
+
+(c) 一个双索引块引用多少个数据块？
+
+(d) UNIX 最大可能的文件大小是多少？
+
+(e) 读取一个 1 GB 文件的最后一个数据块需要多少次块访问？
+
+(f) 给出实现 UNIX 文件中 seek 函数的算法。
+
+**3.14.** 电影和歌曲标题“艳阳天你可望到永远 (On a clear day you can see forever)”有时被误引为“清盘日可无尽寻道 (On a clear disk you can seek forever)”。评论这个双关语的巧妙之处和准确性。
+
+#### 编程练习 (Programming Exercises)
+
+**3.15**. 数据库系统通常包含诊断例程。
+
+(a) 修改 FileMgr 类，使其保留有用的统计数据，例如读取/写入的块数。向该类添加新方法以返回这些统计数据。
+
+(b) 修改 RemoteConnectionImpl 类（在 simpledb.jdbc.network 包中）的 commit 和 rollback 方法，使其打印这些统计数据。对 EmbeddedConnection 类（在 simpledb.jdbc.embedded 包中）执行相同的操作。结果是引擎将打印它执行的每个 SQL 语句的统计数据。
+
+**3.16**. Page 类的 setInt、setBytes 和 setString 方法不检查新值是否适合页面。
+
+(a) 修改代码以执行检查。如果检查失败，您应该怎么做？
+
+(b) 给出不执行检查是合理的理由。
+
+**3.17.** `Page` 类有获取/设置整数、Blob 和字符串的方法。修改该类以处理其他类型，例如短整数、布尔值和日期。
+
+**3.18.** `Page` 类通过从字符串的字符创建 Blob 来实现字符串。实现字符串的另一种方法是单独写入每个字符，并在末尾附加一个分隔符。Java 中一个合理的分隔符是 `'\0'`。相应地修改该类。
