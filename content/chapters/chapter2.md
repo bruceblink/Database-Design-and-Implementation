@@ -702,15 +702,11 @@ public class FindMajors {
 
 这个客户端首先要求用户输入一个系名。然后它将这个系名合并到它执行的 SQL 查询中。例如，假设用户输入了“math”。那么生成的 SQL 查询将是：
 
-SQL
-
 ```sql
 select SName, GradYear from STUDENT, DEPT where DId = MajorId and DName = 'math'
 ```
 
 请注意，在生成查询时，代码是如何在系名周围显式添加单引号的。客户端可以使用**参数化 SQL 语句**来替代这种动态生成 SQL 语句的方式。参数化语句是一种 SQL 语句，其中“`?`”字符表示缺失的参数值。一个语句可以有多个参数，都用“`?`”表示。每个参数都有一个索引值，对应于它在字符串中的位置。例如，以下参数化语句删除所有毕业年份和专业尚未指定的学生。`GradYear` 的值被分配索引 1，`MajorId` 的值被分配索引 2。
-
-SQL
 
 ```sql
 delete from STUDENT where GradYear = ? and MajorId = ?
@@ -764,9 +760,9 @@ public int executeUpdate() throws SQLException;
 public void setInt(int index, int val) throws SQLException;
 public void setString(int index, String val) throws SQLException;
 ```
-
 **图 2.18 PreparedStatement 部分 API**
 
+图 2.18 给出了最常见的 `PreparedStatement` 方法的 API。`executeQuery` 和 `executeUpdate` 方法类似于 `Statement` 中的相应方法；不同之处在于它们不需要任何参数。`setInt` 和 `setString` 方法为参数赋值。在图 2.17 中，对 `setString` 的调用将一个系名分配给第一个索引参数。请注意，`setString` 方法会自动在其值周围插入单引号，因此客户端无需这样做。
 ```java
 // 准备查询
 String qry = "select SName, GradYear from STUDENT, DEPT " + "where DId = MajorId and DName = ?";
@@ -783,9 +779,6 @@ while (major != null) {
 ```
 
 **图 2.19 在循环中使用预处理语句**
-
-图 2.18 给出了最常见的 `PreparedStatement` 方法的 API。`executeQuery` 和 `executeUpdate` 方法类似于 `Statement` 中的相应方法；不同之处在于它们不需要任何参数。`setInt` 和 `setString` 方法为参数赋值。在图 2.17 中，对 `setString` 的调用将一个系名分配给第一个索引参数。请注意，`setString` 方法会自动在其值周围插入单引号，因此客户端无需这样做。
-
 大多数人发现使用**预处理语句**比显式创建 SQL 语句更方便。当在循环中生成语句时，预处理语句也是更高效的选择，如 图 2.19 所示。原因在于数据库引擎能够在不知道参数值的情况下编译预处理语句。它**编译一次**语句，然后在循环中**重复执行**，而无需进一步重新编译。
 
 ### 2.2.5 可滚动和可更新结果集 (Scrollable and Updatable Result Sets)
