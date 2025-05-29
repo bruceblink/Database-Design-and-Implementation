@@ -760,9 +760,11 @@ public int executeUpdate() throws SQLException;
 public void setInt(int index, int val) throws SQLException;
 public void setString(int index, String val) throws SQLException;
 ```
+
 **图 2.18 PreparedStatement 部分 API**
 
 图 2.18 给出了最常见的 `PreparedStatement` 方法的 API。`executeQuery` 和 `executeUpdate` 方法类似于 `Statement` 中的相应方法；不同之处在于它们不需要任何参数。`setInt` 和 `setString` 方法为参数赋值。在图 2.17 中，对 `setString` 的调用将一个系名分配给第一个索引参数。请注意，`setString` 方法会自动在其值周围插入单引号，因此客户端无需这样做。
+
 ```java
 // 准备查询
 String qry = "select SName, GradYear from STUDENT, DEPT " + "where DId = MajorId and DName = ?";
@@ -992,7 +994,7 @@ public class CleverFindMajors {
 
 - 对于简单、不重要的 JDBC 客户端，**自动提交**是一个合理的默认模式。如果客户端执行关键任务，其程序员应仔细分析其事务需求。客户端通过调用 `setAutoCommit(false)` 来关闭自动提交。此调用会导致引擎启动一个新事务。然后，客户端在需要完成当前事务并开始一个新事务时，调用 `commit()` 或 `rollback()`。当客户端关闭自动提交时，它必须通过回滚相关事务来处理失败的 SQL 语句。
 
-- 客户端还可以使用 
+- 客户端还可以使用
 
   ```java
   setTransactionIsolation

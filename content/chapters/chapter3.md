@@ -899,8 +899,6 @@ public class FileMgr {
 
 Chen 等人 (1994) 的文章详细调查了各种 RAID 策略及其性能特征。一本讨论基于 UNIX 文件系统的好书是 von Hagen (2002)，而讨论 Windows NTFS 的是 Nagar (1997)。许多操作系统教科书，如 Silberschatz 等人 (2004)，都提供了各种文件系统实现的简要概述。1
 
-
-
 闪存具有以下特性：覆盖现有值比写入全新值慢得多。因此，针对基于闪存的文件系统进行了大量研究，这些文件系统不覆盖值。此类文件系统将更新存储在日志中，类似于第 4 章的日志。Wu 和 Kuo (2006) 以及 Lee 和 Moon (2007) 的文章探讨了这些问题。
 
 - Chen, P., Lee, E., Gibson, G., & Patterson, D. (1994) RAID: High-performance, reliable secondary storage.2
