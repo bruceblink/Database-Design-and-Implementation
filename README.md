@@ -262,7 +262,7 @@ npm run start
 - [x] 第2章：JDBC
 - [x] 第3章：磁盘与文件管理（Disk and File Management）
 - [x] 第4章：内存管理（Memory Management）
-- [ ] 第5章： 事务管理（Transaction Management）
+- [x] 第5章： 事务管理（Transaction Management）
 - [ ] 第6章： 记录管理（Record Management）
 - [ ] 第7章： 元数据管理（Metadata Management）
 - [ ] 第8章： 查询处理（Query Processing）
@@ -306,7 +306,7 @@ npm run start
 
 ![部署状态](https://img.shields.io/github/deployments/BruceBlink/database-design-and-implementation/Production?label=vercel&logo=vercel)
 ![最近更新](https://img.shields.io/github/last-commit/BruceBlink/database-design-and-implementation?label=最近更新)
-![翻译进度](https://img.shields.io/badge/翻译进度-25%25-green)
+![翻译进度](https://img.shields.io/badge/翻译进度-36%25-green)
 ![维护状态](https://img.shields.io/badge/维护状态-积极维护-brightgreen)
 ![许可证](https://img.shields.io/badge/许可证-MIT-blue)
 
