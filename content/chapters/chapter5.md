@@ -1559,3 +1559,80 @@ class BufferList {
 ```
 
 **图 5.30 `BufferList` 类的代码**
+
+## 5.6 章节总结 (Chapter Summary)
+
+- 当客户端程序能够**不受限制地 (indiscriminately)** 运行时，数据可能会丢失或损坏。数据库引擎强制客户端程序由**事务 (transactions)** 组成。
+
+- **事务 (transaction)** 是一组行为类似于单个操作的操作。它满足**原子性 (atomicity)**、**一致性 (consistency)**、**隔离性 (isolation)** 和**持久性 (durability)** 的 **ACID 属性**。
+
+- **恢复管理器 (recovery manager)** 负责确保**原子性 (atomicity)** 和**持久性 (durability)**。它是服务器中读取和处理**日志 (log)** 的部分。它有三个功能：写入日志记录、回滚事务以及在系统崩溃后恢复数据库。
+
+- 每个事务都会向日志写入一个**开始记录 (start record)** 以表示其开始时间，**更新记录 (update records)** 以指示其所做的修改，以及一个**提交 (commit)** 或**回滚记录 (rollback record)** 以表示其完成时间。此外，恢复管理器可以在不同时间向日志写入**检查点记录 (checkpoint records)**。
+
+- 恢复管理器通过**反向读取日志 (reading the log backwards)** 来回滚事务。它使用事务的更新记录来**撤销 (undo)** 修改。
+
+- 恢复管理器在系统崩溃后恢复数据库。
+
+- **撤销-重做恢复算法 (undo-redo recovery algorithm)** 撤销**未提交事务 (uncommitted transactions)** 所做的修改，并重做**已提交事务 (committed transactions)** 所做的修改。
+
+- **仅撤销恢复算法 (undo-only recovery algorithm)** 假设已提交事务所做的修改在事务提交之前已刷新到磁盘。因此，它只需撤销未提交事务所做的修改。
+
+- **仅重做恢复算法 (redo-only recovery algorithm)** 假设修改后的缓冲区直到事务提交才刷新。该算法要求事务在完成之前保持修改后的缓冲区**固定 (pinned)**，但它避免了撤销未提交事务的需要。
+
+- **预写式日志策略 (write-ahead logging strategy)** 要求在修改后的数据页之前，将**更新日志记录 (update log record)** 强制写入磁盘。预写式日志保证对数据库的修改将始终存在于日志中，因此将始终是可撤销的。
+
+- **检查点记录 (checkpoint records)** 添加到日志中，以减少恢复算法需要考虑的日志部分。当没有事务正在运行时，可以写入**静止检查点记录 (quiescent checkpoint record)**；**非静止检查点记录 (nonquiescent checkpoint record)** 可以随时写入。如果使用撤销-重做（或仅重做）恢复，则恢复管理器必须在写入检查点记录之前将修改后的缓冲区刷新到磁盘。
+
+- 恢复管理器可以选择记录值、记录、页面、文件等。记录的单位称为**恢复数据项 (recovery data item)**。数据项的选择涉及权衡：大粒度数据项将需要更少的更新日志记录，但每个日志记录将更大。
+
+- **并发管理器 (concurrency manager)** 是数据库引擎中负责并发事务正确执行的部分。
+
+- 引擎中事务执行的操作序列称为**调度 (schedule)**。如果一个调度等价于一个**串行调度 (serial schedule)**，则该调度是**可串行化 (serializable)** 的。只有可串行化调度是正确的。
+
+- 并发管理器使用
+
+  锁定 (locking)
+
+   来保证调度是可串行化的。特别是，它要求所有事务遵循
+
+  锁定协议 (lock protocol)
+
+  ，该协议规定：
+
+  - 在读取块之前，获取其**共享锁 (shared lock)**。
+  - 在修改块之前，获取其**排他锁 (exclusive lock)**。
+  - 在提交或回滚后，释放所有锁。
+
+- 如果存在事务循环，其中每个事务都在等待下一个事务持有的锁，则可能发生**死锁 (deadlock)**。并发管理器可以通过维护一个**等待-图 (waits-for graph)** 并检查循环来检测死锁。
+
+- 并发管理器还可以使用算法来**近似死锁检测 (approximate deadlock detection)**。**等待-死亡算法 (wait-die algorithm)** 强制事务在需要由更旧事务持有的锁时回滚。**时间限制算法 (time-limit algorithm)** 强制事务在等待锁的时间超过预期时回滚。这两种算法在死锁存在时都会消除死锁，但也可能不必要地回滚事务。
+
+- 当一个事务正在检查文件时，另一个事务可能会向其中**追加 (append)** 新块。这些块中的值称为**幻影 (phantoms)**。幻影是不希望的，因为它们违反了可串行性。事务可以通过**锁定文件末尾标记 (locking the end-of-file marker)** 来避免幻影。
+
+- 为强制实现可串行性所需的锁定会显著降低并发性。**多版本锁定策略 (multiversion locking strategy)** 允许只读事务在没有锁的情况下运行（从而无需等待）。并发管理器通过将**时间戳 (timestamps)** 与每个事务相关联，并使用这些时间戳来**重建 (reconstruct)** 指定时间点块的版本来实现了多版本锁定。
+
+- 减少锁定造成的等待时间的另一种方法是**取消可串行性要求 (remove the requirement of serializability)**。事务可以指定它属于四种隔离级别之一：**可串行化 (serializable)**、**可重复读 (repeatable read)**、**读已提交 (read committed)** 或**读未提交 (read uncommitted)**。每个非可串行化隔离级别都减少了日志协议对共享锁的限制，从而减少了等待时间，但也增加了读取问题的严重性。选择非可串行化隔离级别的开发人员必须仔细考虑可能发生的不准确结果的程度以及此类不准确结果的可接受性。
+
+- 与恢复一样，并发管理器可以选择锁定值、记录、页面、文件等。锁定的单位称为**并发数据项 (concurrency data item)**。数据项的选择涉及权衡。大粒度数据项将需要更少的锁，但更大的锁会更容易冲突，从而降低并发性。
+
+## 5.7 建议阅读 (Suggested Reading)
+
+事务的概念是分布式计算许多领域（不仅仅是数据库系统）的基础。研究人员已经开发了一套广泛的技术和算法；本章中的思想只是冰山一角。Bernstein 和 Newcomer (1997) 以及 Gray 和 Reuter (1993) 是两本提供该领域概述的优秀书籍。Bernstein 等人 (1987) 对许多并发控制和恢复算法进行了全面处理。一种被广泛采用的恢复算法称为 ARIES，在 Mohan 等人 (1992) 中有描述。
+
+Oracle 对可串行化隔离级别的实现称为**快照隔离 (snapshot isolation)**，它将多版本并发控制扩展到包括更新。详细信息可在 Ashdown 等人 (2019) 第 9 章中找到。请注意，Oracle 将此隔离级别称为“可串行化”，尽管它与真正的可串行化略有不同。快照隔离比锁定协议更高效，但它不保证可串行化。尽管大多数调度将是可串行化的，但在某些场景中它可能导致非可串行化行为。Fekete 等人 (2005) 的文章分析了这些场景，并展示了如何修改有风险的应用程序以保证可串行性。
+
+Oracle 实现了**撤销-重做恢复 (undo-redo recovery)**，但它将**撤销信息 (undo information)**（即旧的、被覆盖的值）与**重做信息 (redo information)**（新写入的值）分离开来。重做信息存储在**重做日志 (redo log)** 中，其管理方式与本章中的描述类似。然而，撤销信息不存储在日志文件中，而是存储在特殊的**撤销缓冲区 (undo buffers)** 中。原因是 Oracle 使用以前被覆盖的值进行多版本并发和恢复。详细信息可在 Ashdown 等人 (2019) 第 9 章中找到。
+
+通常将事务视为由几个更小、协调的事务组成是有用的。例如，在**嵌套事务 (nested transaction)** 中，父事务能够派生一个或多个**子事务 (child subtransactions)**；当子事务完成时，其父级决定如何处理。如果子事务中止，父级可以选择中止其所有子级，或者它可以通过派生另一个事务来替换中止的事务而继续。嵌套事务的基础可以在 Moss (1985) 中找到。Weikum (1991) 的文章定义了**多级事务 (multilevel transactions)**，它类似于嵌套事务；区别在于多级事务使用子事务作为通过并行执行提高效率的一种方式。
+
+**参考文献:**
+
+- Ashdown, L., et al. (2019). Oracle database concepts. Document E96138-01, Oracle Corporation. Retrieved from https://docs.oracle.com/en/database/oracle/oracle-database/19/cncpt/database-concepts.pdf
+- Bernstein, P., Hadzilacos, V., & Goodman, N. (1987). Concurrency control and recovery in database systems. Reading, MA: Addison-Wesley.
+- Bernstein, P., & Newcomer, E. (1997). Principles of transaction processing. San Mateo: Morgan Kaufman.
+- Fekete, A., Liarokapis, D., O’Neil, E., O’Neil, P., & Shasha, D. (2005). Making snapshot isolation serializable. ACM Transactions on Database Systems, 30(2), 492–528.
+- Gray, J., & Reuter, A. (1993). Transaction processing: concepts and techniques. San Mateo: Morgan Kaufman.
+- Mohan, C., Haderle, D., Lindsay, B., Pirahesh, H., & Schwartz, P. (1992). ARIES: A transaction recovery method supporting fine-granularity locking and partial roll-backs using write-ahead logging. ACM Transactions on Database Systems, 17 (1), 94–162.
+- Moss, J. (1985). Nested transactions: An approach to reliable distributed comput- ing. Cambridge, MA: MIT Press.
+- Weikum, G. (1991). Principles and realization strategies of multilevel transaction management. ACM Transactions on Database Systems, 16(1), 132–180.
