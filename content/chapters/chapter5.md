@@ -1628,7 +1628,7 @@ Oracle 实现了**撤销-重做恢复 (undo-redo recovery)**，但它将**撤销
 
 **参考文献:**
 
-- Ashdown, L., et al. (2019). Oracle database concepts. Document E96138-01, Oracle Corporation. Retrieved from https://docs.oracle.com/en/database/oracle/oracle-database/19/cncpt/database-concepts.pdf
+- Ashdown, L., et al. (2019). Oracle database concepts. Document E96138-01, Oracle Corporation. Retrieved from [database-concepts.pdf](https://docs.oracle.com/en/database/oracle/oracle-database/19/cncpt/database-concepts.pdf)
 - Bernstein, P., Hadzilacos, V., & Goodman, N. (1987). Concurrency control and recovery in database systems. Reading, MA: Addison-Wesley.
 - Bernstein, P., & Newcomer, E. (1997). Principles of transaction processing. San Mateo: Morgan Kaufman.
 - Fekete, A., Liarokapis, D., O’Neil, E., O’Neil, P., & Shasha, D. (2005). Making snapshot isolation serializable. ACM Transactions on Database Systems, 30(2), 492–528.
@@ -1636,3 +1636,230 @@ Oracle 实现了**撤销-重做恢复 (undo-redo recovery)**，但它将**撤销
 - Mohan, C., Haderle, D., Lindsay, B., Pirahesh, H., & Schwartz, P. (1992). ARIES: A transaction recovery method supporting fine-granularity locking and partial roll-backs using write-ahead logging. ACM Transactions on Database Systems, 17 (1), 94–162.
 - Moss, J. (1985). Nested transactions: An approach to reliable distributed comput- ing. Cambridge, MA: MIT Press.
 - Weikum, G. (1991). Principles and realization strategies of multilevel transaction management. ACM Transactions on Database Systems, 16(1), 132–180.
+
+## 5.8 练习 (Exercises)
+
+### 概念性练习 (Conceptual Exercises)
+
+**5.1.** 假设 图 5.1 中的代码由两个并发用户运行，但没有事务。给出一个场景，其中预订了两个座位但只记录了一次销售。
+
+5.2. Git 或 Subversion 等软件配置管理器允许用户向文件提交一系列更改，并将文件回滚到以前的状态。它们还允许多个用户并发修改文件。
+
+(a) 在此类系统中，事务 (transaction) 的概念是什么？
+
+(b) 此类系统如何确保可串行性 (serializability)？
+
+(c) 这种方法适用于数据库系统吗？解释。
+
+5.3. 考虑一个执行多个不相关 SQL 查询但未修改数据库的 JDBC 程序。程序员认为，由于没有更新，事务的概念不重要；因此，整个程序作为单个事务运行。
+
+(a) 解释为什么事务的概念对只读程序很重要。
+
+(b) 将整个程序作为大型事务运行有什么问题？
+
+(c) 提交只读事务需要多少开销？程序在每次 SQL 查询后提交是否有意义？
+
+5.4. 恢复管理器在每个事务开始时向日志写入一个开始记录 (start record)。
+
+(a) 日志中包含开始记录的实际好处是什么？
+
+(b) 假设数据库系统决定不向日志写入开始记录。恢复管理器还能正常工作吗？哪些功能会受到影响？
+
+**5.5.** SimpleDB 的 `rollback` 方法在返回之前将**回滚日志记录 (rollback log record)** 写入磁盘。这是必要的吗？这是个好主意吗？
+
+**5.6.** 假设恢复管理器被修改，使其在完成时不再写入回滚日志记录。会有问题吗？这是个好主意吗？
+
+**5.7.** 考虑 图 5.7 的**仅撤销提交算法 (undo-only commit algorithm)**。解释为什么交换算法的步骤 1 和 2 是不正确的。
+
+**5.8.** 证明如果在回滚或恢复期间系统崩溃，那么**重做 (redoing)** 回滚（或恢复）仍然是正确的。
+
+**5.9.** 在回滚或恢复期间，是否有任何理由记录对数据库所做的更改？解释。
+
+5.10. 非静止检查点算法 (nonquiescent checkpointing algorithm) 的一个变体是在检查点日志记录中只提及一个事务，即当时最老的活跃事务 (active transaction)。
+
+(a) 解释恢复算法将如何工作。
+
+(b) 将此策略与文本中给出的策略进行比较。哪个实现更简单？哪个更高效？
+
+**5.11.** 如果回滚方法遇到**静止检查点日志记录 (quiescent checkpoint log record)**，它应该怎么做？如果它遇到**非静止日志记录 (nonquiescent log record)** 呢？解释。
+
+**5.12.** 非静止检查点算法不允许在写入检查点记录时启动新事务。解释为什么此限制对于正确性很重要。
+
+5.13. 另一种进行非静止检查点的方法是向日志写入两条记录。第一条记录是 <BEGIN_NQCKPT>，不包含其他内容。第二条记录是标准的 <NQCKPT ...> 记录，其中包含活跃事务列表。当恢复管理器决定进行检查点时，立即写入第一条记录。第二条记录稍后在创建活跃事务列表后写入。
+
+(a) 解释为什么此策略解决了练习 5.12 的问题。
+
+(b) 给出一个包含此策略的修订版恢复算法。
+
+**5.14.** 解释为什么恢复管理器在恢复期间永远不会遇到多个**静止检查点记录 (quiescent checkpoint record)**。
+
+**5.15.** 给出一个示例，说明恢复管理器在恢复期间可能会遇到多个**非静止检查点记录 (nonquiescent checkpoint records)**。它如何最好地处理在第一个检查点记录之后找到的非静止检查点记录？
+
+**5.16.** 解释为什么恢复管理器在恢复期间不可能同时遇到非静止检查点记录和静止检查点记录。
+
+5.17. 考虑 图 5.6 的恢复算法。步骤 1c 不会撤销已回滚事务的值。
+
+(a) 解释为什么这样做是正确的。
+
+(b) 如果它确实撤销了这些值，算法会正确吗？解释。
+
+**5.18.** 当 `rollback` 方法需要恢复值的原始内容时，它直接写入页面，不请求任何类型的锁。这会与另一个事务产生**非可串行化冲突 (non-serializable conflict)** 吗？解释。
+
+**5.19.** 解释为什么不可能有一种结合了**仅撤销 (undo-only)** 和**仅重做 (redo-only)** 恢复技术的恢复算法。也就是说，解释为什么必须保留撤销信息或重做信息。
+
+5.20. 假设系统崩溃后重启时，恢复管理器在日志文件中找到以下记录：
+
+```txt
+<START, 1>
+<START, 2>
+<SETSTRING, 2, junk, 33, 0, abc, def>
+<SETSTRING, 1, junk, 44, 0, abc, xyz>
+<START, 3>
+<COMMIT, 2>
+<SETSTRING, 3, junk, 33, 0, def, joe>
+<START, 4>
+<SETSTRING, 4, junk, 55, 0, abc, sue>
+<NQCKPT, 1, 3, 4>
+<SETSTRING, 4, junk, 55, 0, sue, max>
+<START, 5>
+<COMMIT, 4>
+```
+
+(a) 假设使用撤销-重做恢复 (undo-redo recovery)，指出将执行哪些数据库更改。
+
+(b) 假设使用仅撤销恢复 (undo-only recovery)，指出将执行哪些数据库更改。
+
+(c) 即使事务 T1 在日志中没有提交记录，它有可能已经提交吗？
+
+(d) 事务 T1 有可能修改了包含块 23 的缓冲区吗？
+
+(e) 事务 T1 有可能修改了磁盘上的块 23 吗？
+
+(f) 事务 T1 有可能没有修改包含块 44 的缓冲区吗？
+
+**5.21.** **串行调度 (serial schedule)** 总是**可串行化 (serializable)** 的吗？**可串行化调度 (serializable schedule)** 总是**串行 (serial)** 的吗？解释。
+
+5.22. 本练习要求您检查非串行调度 (non-serial schedules) 的必要性。
+
+(a) 假设数据库比缓冲区池的大小大得多。解释为什么如果数据库系统可以并发执行事务，它将更快地处理事务。
+
+(b) 反之，解释为什么如果数据库适合缓冲区池，并发性就不那么重要了。
+
+**5.23.** SimpleDB 类 `Transaction` 中的 `get/set` 方法获取指定块上的锁。为什么它们在完成时不安卓锁？
+
+**5.24.** 考虑 图 5.3。如果文件是并发的元素，给出事务的历史记录。
+
+5.25. 考虑以下两个事务及其历史：
+
+```txt
+T1: W(b1); R(b2); W(b1); R(b3); W(b3); R(b4); W(b2)
+T2: R(b2); R(b3); R(b1); W(b3); R(b4); W(b4)
+```
+
+(a) 为这些事务给出一个可串行化的非串行调度。
+
+(b) 在这些历史记录中添加满足锁定协议 (lock protocol) 的锁定 (lock) 和解锁 (unlock) 操作。
+
+(c) 给出一个与这些锁对应的死锁非串行调度。
+
+(d) 证明对于这些事务，不存在遵守锁定协议的无死锁非串行可串行化调度。
+
+**5.26.** 给出一个示例调度，该调度是可串行化的，但具有不影响事务提交顺序的冲突写入-写入操作。（提示：某些冲突操作将没有相应的读取操作。）
+
+**5.27.** 证明如果所有事务都遵守**两阶段锁定协议 (two-phase locking protocol)**，则所有调度都是可串行化的。
+
+**5.28.** 证明**等待-图 (waits-for graph)** 具有循环当且仅当存在**死锁 (deadlock)**。
+
+**5.29.** 假设事务管理器维护一个等待-图以准确检测死锁。第 5.4.4 节建议事务管理器回滚其请求导致图中循环的事务。其他可能性是回滚循环中最老的事务、循环中最新的事务、持有最多锁的事务或持有最少锁的事务。您认为哪种可能性最有意义？解释。
+
+**5.30.** 假设在 SimpleDB 中，事务 T 当前在一个块上持有共享锁并对其调用 `setInt`。给出一个将导致死锁的场景。
+
+**5.31.** 考虑 图 5.19 的 `ConcurrencyTest` 类。给出一个导致死锁的调度。
+
+**5.32.** 考虑 图 5.19 中描述的锁定场景。随着锁的请求和释放，绘制等待-图的不同状态。
+
+**5.33.** **等待-死亡协议 (wait-die protocol)** 的一个变体称为**受伤-等待 (wound-wait)**，其规则如下：
+
+- 如果 T1 的编号低于 T2，则 T2 被中止（即 T1“伤害”T2）。
+- 如果 T1 的编号高于 T2，则 T1 等待锁。 其思想是，如果一个较老的事务需要一个由较年轻事务持有的锁，那么它就直接杀死较年轻事务并获取锁。 (a) 证明此协议可以防止死锁。 (b) 比较等待-死亡协议和受伤-等待协议的相对优势。
+
+**5.34.** 在**等待-死亡死锁检测协议 (wait-die deadlock detection protocol)** 中，如果事务请求由更旧事务持有的锁，则它将被中止。假设您修改了协议，如果事务请求由**更年轻事务 (younger transaction)** 持有的锁，则它将被中止。此协议也将检测死锁。此修订后的协议与原始协议相比如何？您更喜欢事务管理器使用哪个？解释。
+
+**5.35.** 解释为什么 `LockTable` 类中的 `lock/unlock` 方法是**同步的 (synchronized)**。如果它们不是同步的，可能会发生什么坏事？
+
+**5.36.** 假设数据库系统使用文件作为并发元素。解释为什么**幻影 (phantoms)** 不可能发生。
+
+**5.37.** 给出一个也能处理等待缓冲区的事务的死锁检测算法。
+
+**5.38.** 重写**多版本锁定 (multiversion locking)** 算法，使并发管理器只对日志文件进行一次遍历。
+
+**5.39.** **读已提交事务隔离级别 (read-committed transaction isolation level)** 声称通过**早期释放 (releasing early)** 其共享锁来减少事务的等待时间。乍一看，事务通过释放它已经拥有的锁来减少等待时间并不明显。解释早期锁释放的优点并给出说明性场景。
+
+**5.40.** `nextTransactionNumber` 方法是 `Transaction` 类中唯一一个同步的方法。解释为什么其他方法不需要同步。
+
+5.41. 考虑 SimpleDB 类 Transaction。
+
+(a) 事务可以在不锁定的情况下固定 (pin) 一个块吗？
+
+(b) 事务可以在不固定的情况下锁定 (lock) 一个块吗？
+
+### 编程练习 (Programming Exercises)
+
+5.42. SimpleDB 事务在每次调用 getInt 或 getString 方法时都会获取块上的共享锁。另一种可能性是在固定 (pinning) 块时获取共享锁，假设您只有在打算查看其内容时才会固定块。
+
+(a) 实现此策略。
+
+(b) 将此策略的优点与 SimpleDB 的优点进行比较。您更喜欢哪一个以及为什么？
+
+**5.43.** 恢复后，除了归档目的外，不再需要日志。修改 SimpleDB 代码，使日志文件在恢复后保存到单独的目录中，并开始一个新的空日志文件。
+
+**5.44.** 修改 SimpleDB 恢复管理器，使其仅在必要时撤销更新记录。
+
+**5.45.** 修改 SimpleDB，使其使用**块 (blocks)** 作为恢复的元素。一种可能的策略是事务第一次修改块时保存该块的副本。该副本可以保存在单独的文件中，更新日志记录可以保存副本的块号。您还需要编写可以在文件之间复制块的方法。
+
+**5.46.** 在 `Transaction` 类中实现一个执行**静止检查点 (quiescent checkpointing)** 的静态方法。决定该方法将如何被调用（例如，每 N 个事务，每 N 秒，或手动）。您需要如下修改 `Transaction`：
+
+- 使用静态变量来保存所有当前活跃事务。
+- 修改 `Transaction` 的构造函数，检查是否正在执行检查点，如果是，则将自身置于等待列表，直到检查点过程完成。
+
+**5.47.** 使用文本中描述的策略实现**非静止检查点 (nonquiescent checkpointing)**。
+
+**5.48.** 假设一个事务向文件追加了许多块，向这些块写入了许多值，然后回滚。新块将恢复到其初始状态，但它们本身不会从文件中删除。修改 SimpleDB，使其能够删除。 (提示：您可以利用每次只有一个事务可以向文件追加的事实，这意味着可以在回滚期间**截断 (truncate)** 文件。您需要向文件管理器添加截断文件的能力。)
+
+5.49. 日志记录除了用于恢复外，还可以用于审计 (auditing) 系统。对于审计，记录需要存储活动发生的日期以及客户端的 IP 地址。
+
+(a) 以这种方式修改 SimpleDB 日志记录。
+
+(b) 设计并实现一个类，其方法支持常见的审计任务，例如查找块最后一次修改的时间，或者特定事务或特定 IP 地址发生了哪些活动。
+
+5.50. 每次服务器启动时，事务编号都从 0 重新开始。这意味着在数据库的整个历史中，会有多个事务拥有相同的编号。
+
+(a) 解释为什么事务编号的这种非唯一性 (non-uniqueness) 不是一个显著问题。
+
+(b) 修改 SimpleDB，使事务编号从服务器上次运行时继续。
+
+**5.51.** 修改 SimpleDB，使其使用**撤销-重做恢复 (undo-redo recovery)**。
+
+5.52. 在 SimpleDB 中实现死锁检测，使用：
+
+(a) 文本中给出的等待-死亡协议 (wait-die protocol)
+
+(b) 练习 5.33 中给出的受伤-等待协议 (wound-wait protocol)
+
+**5.53.** 修改锁表，使其为每个块使用**单独的等待列表 (individual wait lists)**。（因此 `notifyAll` 只会触及等待相同锁的线程。）
+
+**5.54.** 修改锁表，使其维护自己的**显式等待列表 (explicit wait list(s))**，并在锁可用时自行选择通知哪些事务。（即，它使用 Java 的 `notify` 方法而不是 `notifyAll`。）
+
+5.55. 修改 SimpleDB 并发管理器，使其：
+
+(a) 文件 (Files) 是并发的元素。
+
+(b) 值 (Values) 是并发的元素。（警告：您仍然需要避免 size 和 append 方法造成冲突。）
+
+5.56. 编写测试程序：
+
+(a) 验证恢复管理器是否正常工作（提交、回滚和恢复）
+
+(b) 更完整地测试锁管理器
+
+(c) 测试整个事务管理器
