@@ -620,4 +620,329 @@ public class SetStringRecord implements LogRecord {
 
 `doRollback` 方法遍历日志记录。每当它找到该事务的日志记录时，它都会调用记录的 `undo` 方法。当它遇到该事务的开始记录时，它会停止。
 
+```java
+public class RecoveryMgr {
+    private LogMgr lm;      // 日志管理器
+    private BufferMgr bm;   // 缓冲区管理器
+    private Transaction tx; // 关联的事务对象
+    private int txnum;      // 事务 ID
+
+
+    // 构造函数：创建一个新的 RecoveryMgr 对象，并写入一个 START 日志记录
+    public RecoveryMgr(Transaction tx, int txnum, LogMgr lm, BufferMgr bm) {
+        this.tx = tx;
+        this.txnum = txnum;
+        this.lm = lm;
+        this.bm = bm;
+        StartRecord.writeToLog(lm, txnum); // 事务开始时写入 START 记录
+    }
+
+    // 提交事务：
+    // 1. 刷新该事务修改过的所有缓冲区到磁盘。
+    // 2. 写入 COMMIT 日志记录。
+    // 3. 强制日志管理器将包含 COMMIT 记录的页面刷新到磁盘，确保持久性。
+    public void commit() {
+        bm.flushAll(txnum); // 刷新所有属于此事务的缓冲区
+        int lsn = CommitRecord.writeToLog(lm, txnum); // 写入 COMMIT 记录
+        lm.flush(lsn); // 刷新日志到磁盘
+    }
+
+    // 回滚事务：
+    // 1. 执行实际的回滚操作 (doRollback)。
+    // 2. 刷新该事务修改过的所有缓冲区到磁盘。
+    // 3. 写入 ROLLBACK 日志记录。
+    // 4. 强制日志管理器将包含 ROLLBACK 记录的页面刷新到磁盘。
+    public void rollback() {
+        doRollback(); // 执行回滚逻辑
+        bm.flushAll(txnum); // 刷新所有属于此事务的缓冲区
+        int lsn = RollbackRecord.writeToLog(lm, txnum); // 写入 ROLLBACK 记录
+        lm.flush(lsn); // 刷新日志到磁盘
+    }
+
+    // 恢复数据库：
+    // 1. 执行实际的恢复操作 (doRecover)。
+    // 2. 刷新所有缓冲区到磁盘。
+    // 3. 写入 CHECKPOINT 日志记录。
+    // 4. 强制日志管理器将包含 CHECKPOINT 记录的页面刷新到磁盘。
+    public void recover() {
+        doRecover(); // 执行恢复逻辑
+        bm.flushAll(txnum); // 刷新所有缓冲区
+        int lsn = CheckpointRecord.writeToLog(lm); // 写入 CHECKPOINT 记录
+        lm.flush(lsn); // 刷新日志到磁盘
+    }
+
+    // 记录 SETINT 操作：
+    // 1. 获取缓冲区中指定偏移量的旧值。
+    // 2. 将旧值、事务 ID、块信息、偏移量和新值写入 SETINT 日志记录。
+    public int setInt(Buffer buff, int offset, int newval) {
+        int oldval = buff.contents().getInt(offset); // 获取旧值
+        BlockId blk = buff.block(); // 获取块 ID
+        // 写入 SETINT 记录，包含事务ID、块ID、偏移量、旧值和新值
+        return SetIntRecord.writeToLog(lm, txnum, blk, offset, oldval);
+    }
+
+    // 记录 SETSTRING 操作：
+    // 1. 获取缓冲区中指定偏移量的旧值。
+    // 2. 将旧值、事务 ID、块信息、偏移量和新值写入 SETSTRING 日志记录。
+    public int setString(Buffer buff, int offset, String newval) {
+        String oldval = buff.contents().getString(offset); // 获取旧值
+        BlockId blk = buff.block(); // 获取块 ID
+        // 写入 SETSTRING 记录，包含事务ID、块ID、偏移量、旧值和新值
+        return SetStringRecord.writeToLog(lm, txnum, blk, offset, oldval);
+    }
+
+    // 私有方法：执行事务的回滚操作 (仅撤销)
+    // 从日志末尾向后读取，找到属于当前事务的更新记录并撤销其更改，直到遇到该事务的 START 记录。
+    private void doRollback() {
+        Iterator<byte[]> iter = lm.iterator(); // 获取日志迭代器（从后向前）
+        while (iter.hasNext()) {
+            byte[] bytes = iter.next();
+            LogRecord rec = LogRecord.createLogRecord(bytes); // 创建日志记录对象
+            if (rec.txNumber() == txnum) { // 如果记录属于当前事务
+                if (rec.op() == START) { // 如果是 START 记录，说明已回滚到事务开始，停止
+                    return;
+                }
+                rec.undo(tx); // 调用日志记录的 undo 方法来撤销更改
+            }
+        }
+    }
+
+    // 私有方法：执行数据库的恢复操作 (仅撤销)
+    // 从日志末尾向后读取，记录已提交/已回滚的事务，并撤销所有未完成事务的更改。
+    // 遇到 CHECKPOINT 记录时停止。
+    private void doRecover() {
+        Collection<Integer> finishedTxs = new ArrayList<Integer>(); // 存储已完成事务的 ID
+        Iterator<byte[]> iter = lm.iterator(); // 获取日志迭代器（从后向前）
+        while (iter.hasNext()) {
+            byte[] bytes = iter.next();
+            LogRecord rec = LogRecord.createLogRecord(bytes); // 创建日志记录对象
+            if (rec.op() == CHECKPOINT) { // 如果是 CHECKPOINT 记录，停止
+                return;
+            }
+            if (rec.op() == COMMIT || rec.op() == ROLLBACK) { // 如果是 COMMIT 或 ROLLBACK 记录
+                finishedTxs.add(rec.txNumber()); // 将事务 ID 添加到已完成列表
+            } else if (!finishedTxs.contains(rec.txNumber())) { // 如果是更新记录且事务未完成
+                rec.undo(tx); // 撤销其更改
+            }
+        }
+    }
+
+}
+```
+
+**图 5.16 SimpleDB `RecoveryMgr` 类的代码**
+
 `doRecover` 方法的实现类似。它读取日志直到遇到**静止检查点记录 (quiescent checkpoint record)** 或到达日志末尾，同时维护一个已提交事务编号列表。它撤销未提交的更新记录的方式与回滚相同，不同之处在于它处理所有未提交的事务，而不仅仅是特定的一个。此方法与图 5.6 的恢复算法略有不同，因为它会撤销已回滚的事务。尽管这种差异不会导致代码不正确，但它会降低效率。练习 5.50 要求您改进它。
+
+## 5.4 并发管理 (Concurrency Management)
+
+并发管理器是数据库引擎中负责**并发事务 (concurrent transactions)** 正确执行的组件。本节将探讨“正确”执行的含义，并研究一些确保正确性的算法。
+
+### 5.4.1 可串行化调度 (Serializable Schedules)
+
+一个事务的**历史 (history)** 是它对数据库文件进行访问的方法调用序列——特别是 `get/set` 方法。[¹ 例如，图 5.3 中每个事务的历史可以相当繁琐地写成 图 5.17a 所示。表达事务历史的另一种方式是根据受影响的块来表示，如 图 5.17b 所示。例如，`tx2` 的历史表明它两次从块 `blk` 读取，然后两次写入 `blk`。
+
+```txt
+tx1: setInt(blk, 80, 1, false);     // 事务 1: 设置整数
+     setString(blk, 40, "one", false);  // 事务 1: 设置字符串
+
+tx2: getInt(blk, 80);               // 事务 2: 获取整数
+     getString(blk, 40);            // 事务 2: 获取字符串
+     setInt(blk, 80, newival, true);    // 事务 2: 设置整数
+     setString(blk, 40, newsval, true); // 事务 2: 设置字符串
+
+tx3: getInt(blk, 80));              // 事务 3: 获取整数
+     getString(blk, 40));           // 事务 3: 获取字符串
+     setInt(blk, 80, 9999, true);   // 事务 3: 设置整数
+     getInt(blk, 80));              // 事务 3: 获取整数
+
+tx4: getInt(blk, 80));              // 事务 4: 获取整数
+
+(a) 数据访问历史
+
+tx1: W(blk); W(blk)             // 事务 1: 写 blk; 写 blk
+tx2: R(blk); R(blk); W(blk); W(blk) // 事务 2: 读 blk; 读 blk; 写 blk; 写 blk
+tx3: R(blk); R(blk); W(blk); R(blk) // 事务 3: 读 blk; 读 blk; 写 blk; 读 blk
+tx4: R(blk)                     // 事务 4: 读 blk
+
+(b) 块访问历史
+```
+
+**图 5.17 图 5.3 中的事务历史。(a) 数据访问历史，(b) 块访问历史**
+
+形式上，事务的历史是该事务所做的**数据库动作 (database actions)** 序列。“数据库动作”这个术语故意模糊。图 5.17 的 (a) 部分将数据库动作视为对值的修改，而 (b) 部分将其视为对磁盘块的读/写。还有其他可能的粒度，将在第 5.4.8 节中讨论。在此之前，我将假定数据库动作是对磁盘块的读取或写入。
+
+当多个事务并发运行时，数据库引擎将**交错 (interleave)** 它们的线程执行，定期中断一个线程并恢复另一个线程。（在 SimpleDB 中，Java 运行时环境会自动执行此操作。）因此，并发管理器执行的实际操作序列将是其事务历史的不可预测的交错。这种交错称为**调度 (schedule)**。
+
+并发控制的目的是确保只执行**正确 (correct)** 的调度。但“正确”意味着什么？嗯，考虑最简单的调度——所有事务都**串行运行 (serially)** 的调度（例如 图 5.17）。此调度中的操作不会交错，也就是说，调度将简单地是每个事务的历史背靠背。这种调度称为**串行调度 (serial schedule)**。并发控制的前提是串行调度必须是正确的，因为没有并发。
+
+以串行调度来定义正确性的有趣之处在于，同一事务的不同串行调度可以给出不同的结果。例如，考虑两个事务 T1 和 T2，它们具有以下相同的历史：
+
+```txt
+T1: W(b1); W(b2)
+T2: W(b1); W(b2)
+```
+
+尽管这些事务具有相同的历史（即，它们都先写入块 b1，然后写入块 b2），但它们作为事务不一定相同——例如，T1 可能在每个块的开头写入一个“X”，而 T2 可能写入一个“Y”。如果 T1 在 T2 之前执行，则块将包含 T2 写入的值，但如果它们以相反的顺序执行，则块将包含 T1 写入的值。
+
+在这个例子中，T1 和 T2 对块 b1 和 b2 应该包含什么有不同的看法。由于在数据库引擎看来所有事务都是平等的，所以无法说一个结果比另一个更正确。因此，您被迫承认任何一个串行调度的结果都是正确的。也就是说，可以有几个正确的结果。
+
+如果一个非串行调度 (non-serial schedule) 产生与某个串行调度相同的结果，则称其为可串行化 (serializable)。² 由于串行调度是正确的，因此可串行化调度也必须是正确的。例如，考虑上述事务的以下非串行调度：
+
+`W1(b1); W2(b1); W1(b2); W2(b2)`
+
+这里，W1(b1) 意味着事务 T1 写入块 b1，依此类推。此调度是 T1 的前半部分运行，接着是 T2 的前半部分，T1 的后半部分，以及 T2 的后半部分。此调度是可串行化的，因为它等价于先执行 T1 然后执行 T2。另一方面，考虑以下调度：
+
+`W1(b1); W2(b1); W2(b2); W1(b2)`
+
+此事务执行 T1 的前半部分，T2 的全部，然后是 T1 的后半部分。此调度的结果是块 b1 包含 T2 写入的值，但块 b2 包含 T1 写入的值。这个结果不能由任何串行调度产生，因此该调度被称为**不可串行化 (non-serializable)**。
+
+回想一下**隔离性 (isolation)** 的 ACID 特性，它指出每个事务的执行应该像它是系统中唯一的事务一样。一个不可串行化调度不具备此特性。因此，您被迫承认不可串行化调度是不正确的。换句话说，一个调度**当且仅当**它是可串行化时才是正确的。
+
+------
+
+¹ 译者注：在原文中，get/set 方法是对数据库文件进行访问，但在本节中，作者明确指出“数据库动作是对磁盘块的读取或写入”。这可能指的是对 Page 对象中的数据进行 getInt/setString 操作，而 Page 对象本身是缓冲区管理器从磁盘读取的块。因此，这些操作最终对应于对底层磁盘块的读写。
+
+² 译者注：这个定义是数据库并发控制的核心概念之一。它确保了并发执行的正确性。
+
+------
+
+### 5.4.2 锁表 (The Lock Table)
+
+数据库引擎负责确保所有调度都是可串行化的。一种常见技术是使用**锁定 (locking)** 来推迟事务的执行。第 5.4.3 节将探讨如何使用锁定来确保可串行化。本节仅检查基本锁定机制的工作原理。
+
+每个块有两种类型的锁——**共享锁 (shared lock)**（或 `slock`）和**排他锁 (exclusive lock)**（或 `xlock`）。如果一个事务在一个块上持有排他锁，则不允许其他任何事务在该块上持有任何类型的锁；如果事务在一个块上持有共享锁，则其他事务只允许在该块上持有共享锁。请注意，这些限制仅适用于**其他**事务。单个事务可以在一个块上同时持有共享锁和排他锁。
+
+**锁表 (lock table)** 是数据库引擎中负责向事务授予锁的组件。SimpleDB 类 `LockTable` 实现了锁表。其 API 如 图 5.18 所示。
+
+```java
+public class LockTable {
+    public void sLock(Block blk);  // 请求指定块的共享锁
+    public void xLock(Block blk);  // 请求指定块的排他锁
+    public void unlock(Block blk); // 释放指定块的锁
+}
+```
+
+**图 5.18 SimpleDB 类 LockTable 的 API**
+
+`sLock` 方法请求指定块的共享锁。如果该块上已存在排他锁，则该方法会等待直到排他锁被释放。`xLock` 方法请求块的排他锁。该方法会等待直到没有其他事务在该块上持有任何类型的锁。`unlock` 方法释放块上的锁。
+
+图 5.19 介绍了 `ConcurrencyTest` 类，它演示了一些锁请求之间的交互。
+
+```java
+public class ConcurrencyTest {
+    private static FileMgr fm;
+    private static LogMgr lm;
+    private static BufferMgr bm;
+
+    public static void main(String[] args) {
+        // 初始化数据库引擎
+        SimpleDB db = new SimpleDB("concurrencytest", 400, 8);
+        fm = db.fileMgr();
+        lm = db.logMgr();
+        bm = db.bufferMgr();
+
+        // 创建并启动三个并发线程
+        A a = new A(); new Thread(a).start();
+        B b = new B(); new Thread(b).start();
+        C c = new C(); new Thread(c).start();
+    }
+
+    // 线程 A 类
+    static class A implements Runnable {
+        public void run() {
+            try {
+                Transaction txA = new Transaction(fm, lm, bm);
+                BlockId blk1 = new BlockId("testfile", 1);
+                BlockId blk2 = new BlockId("testfile", 2);
+
+                txA.pin(blk1); // 事务 A 固定块 1
+                txA.pin(blk2); // 事务 A 固定块 2
+
+                System.out.println("Tx A: request slock 1");
+                txA.getInt(blk1, 0); // 请求块 1 的共享锁 (getInt 会内部调用 slock)
+                System.out.println("Tx A: receive slock 1");
+                Thread.sleep(1000); // 暂停 1 秒
+
+                System.out.println("Tx A: request slock 2");
+                txA.getInt(blk2, 0); // 请求块 2 的共享锁
+                System.out.println("Tx A: receive slock 2");
+                txA.commit(); // 提交事务，释放所有锁
+            }
+            catch(InterruptedException e) {};
+        }
+    }
+
+    // 线程 B 类
+    static class B implements Runnable {
+        public void run() {
+            try {
+                Transaction txB = new Transaction(fm, lm, bm);
+                BlockId blk1 = new BlockId("testfile", 1);
+                BlockId blk2 = new BlockId("testfile", 2);
+
+                txB.pin(blk1); // 事务 B 固定块 1
+                txB.pin(blk2); // 事务 B 固定块 2
+
+                System.out.println("Tx B: request xlock 2");
+                txB.setInt(blk2, 0, 0, false); // 请求块 2 的排他锁 (setInt 会内部调用 xlock)
+                System.out.println("Tx B: receive xlock 2");
+                Thread.sleep(1000); // 暂停 1 秒
+
+                System.out.println("Tx B: request slock 1");
+                txB.getInt(blk1, 0); // 请求块 1 的共享锁
+                System.out.println("Tx B: receive slock 1");
+                txB.commit(); // 提交事务，释放所有锁
+            }
+            catch(InterruptedException e) {};
+        }
+    }
+
+    // 线程 C 类
+    static class C implements Runnable {
+        public void run() {
+            try {
+                Transaction txC = new Transaction(fm, lm, bm);
+                BlockId blk1 = new BlockId("testfile", 1);
+                BlockId blk2 = new BlockId("testfile", 2);
+
+                txC.pin(blk1); // 事务 C 固定块 1
+                txC.pin(blk2); // 事务 C 固定块 2
+
+                System.out.println("Tx C: request xlock 1");
+                txC.setInt(blk1, 0, 0, false); // 请求块 1 的排他锁
+                System.out.println("Tx C: receive xlock 1");
+                Thread.sleep(1000); // 暂停 1 秒
+
+                System.out.println("Tx C: request slock 2");
+                txC.getInt(blk2, 0); // 请求块 2 的共享锁
+                System.out.println("Tx C: receive slock 2");
+                txC.commit(); // 提交事务，释放所有锁
+            }
+            catch(InterruptedException e) {};
+        }
+    }
+}
+```
+
+**图 5.19 测试锁请求之间的交互**
+
+`main` 方法执行三个并发线程，分别对应 `A`、`B` 和 `C` 类的一个对象。这些事务不显式地锁定和解锁块。相反，`Transaction` 的 `getInt` 方法获取一个 `slock`，其 `setInt` 方法获取一个 `xlock`，而其 `commit` 方法解锁其所有锁。因此，每个事务的锁和解锁序列如下所示：
+
+- `txA`: `sLock(blk1)`; `sLock(blk2)`; `unlock(blk1)`; `unlock(blk2)`
+- `txB`: `xLock(blk2)`; `sLock(blk1)`; `unlock(blk1)`; `unlock(blk2)`
+- `txC`: `xLock(blk1)`; `sLock(blk2)`; `unlock(blk1)`; `unlock(blk2)`
+
+这些线程中包含 `sleep` 语句，以强制事务交替其锁请求。以下事件序列会发生：
+
+1. 线程 A 获取 `blk1` 上的 **共享锁 (slock)**。
+2. 线程 B 获取 `blk2` 上的 **排他锁 (xlock)**。
+3. 线程 C 无法获取 `blk1` 上的 `xlock`，因为其他事务已持有该块的锁。因此，线程 C 等待。
+4. 线程 A 无法获取 `blk2` 上的 `slock`，因为其他事务已持有该块的 `xlock`。因此，线程 A 也等待。
+5. 线程 B 可以继续。它获取 `blk1` 上的 `slock`，因为当前没有其他事务持有该块的 `xlock`。（线程 C 正在等待该块的 `xlock` 并不重要。）
+6. 线程 B 解锁块 `blk1`，但这并没有帮助任何等待中的线程。
+7. 线程 B 解锁块 `blk2`。
+8. 线程 A 现在可以继续并获取 `blk2` 上的 `slock`。
+9. 线程 A 解锁块 `blk1`。
+10. 线程 C 最终能够获取 `blk1` 上的 `xlock`。
+11. 线程 A 和 C 可以以任意顺序继续，直到它们完成。
