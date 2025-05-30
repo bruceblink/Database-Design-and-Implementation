@@ -1354,3 +1354,208 @@ public class ConcurrencyMgr {
 这个要求通过让每个 `ConcurrencyMgr` 对象共享一个**静态 (static)** `LockTable` 变量来实现。事务持有的锁的描述保存在局部变量 `locks` 中。这个变量保存了一个 map，其中包含每个被锁定块的条目。与条目关联的值是 “S” 或 “X”，取决于该块上是共享锁还是排他锁。
 
 `sLock` 方法首先检查事务是否已经持有该块的锁；如果是，则无需访问锁表。否则，它调用锁表的 `sLock` 方法并等待锁的授予。如果事务已经持有该块的排他锁，`xLock` 方法则不需要做任何事情。如果不是，该方法首先获取该块的共享锁，然后获取排他锁。（回想一下，锁表的 `xLock` 方法假定事务已经持有共享锁。）请注意，排他锁比共享锁“更强”，从某种意义上说，一个事务如果在一个块上持有排他锁，则它也隐式地持有该块的共享锁。
+
+### 5.5 实现 SimpleDB 事务 (Implementing SimpleDB Transactions)
+
+第 5.2 节介绍了 `Transaction` 类的 API。现在可以讨论它的实现了。`Transaction` 类使用 `BufferList` 类来管理它已经**固定 (pinned)** 的缓冲区。这两个类将依次讨论。
+
+#### `Transaction` 类 (The Class Transaction)
+
+`Transaction` 类的代码如 图 5.29 所示。每个 `Transaction` 对象都会创建自己的**恢复管理器 (recovery manager)** 和**并发管理器 (concurrency manager)**。它还会创建 `myBuffers` 对象来管理当前固定的缓冲区。
+
+`commit` 和 `rollback` 方法执行以下活动：
+
+- 它们**解除固定 (unpin)** 任何剩余的缓冲区。
+- 它们调用恢复管理器来**提交 (commit)**（或**回滚 (roll back)**）事务。
+- 它们调用并发管理器来**释放 (release)** 其锁。
+
+`getInt` 和 `getString` 方法首先从并发管理器获取指定块的**共享锁 (slock)**，然后从缓冲区返回请求的值。`setInt` 和 `setString` 方法首先从并发管理器获取**排他锁 (xlock)**，然后调用恢复管理器中相应的方法来创建适当的日志记录并返回其 **LSN (Log Sequence Number)**。这个 LSN 随后可以传递给缓冲区的 `setModified` 方法。
+
+```java
+public class Transaction {
+    private static int nextTxNum = 0; // 静态变量，用于生成下一个事务ID
+    private static final int END_OF_FILE = -1; // 文件末尾的虚拟块号
+
+    private RecoveryMgr recoveryMgr; // 负责事务的恢复（提交、回滚、崩溃恢复）
+    private ConcurrencyMgr concurMgr; // 负责事务的并发控制（锁管理）
+    private BufferMgr bm;             // 缓冲区管理器
+    private FileMgr fm;               // 文件管理器
+    private int txnum;                // 当前事务的ID
+    private BufferList mybuffers;     // 管理当前事务固定的缓冲区列表
+    
+    // 构造函数：初始化事务及其关联的管理器
+    public Transaction(FileMgr fm, LogMgr lm, BufferMgr bm) {
+        this.fm = fm;
+        this.bm = bm;
+        txnum = nextTxNumber(); // 获取并设置当前事务的唯一ID
+        recoveryMgr = new RecoveryMgr(this, txnum, lm, bm); // 创建恢复管理器
+        concurMgr = new ConcurrencyMgr(); // 创建并发管理器
+        mybuffers = new BufferList(bm); // 创建缓冲区列表管理器
+    }
+    
+    // 提交事务：执行提交操作的顺序（恢复 -> 并发 -> 缓冲区）
+    public void commit() {
+        recoveryMgr.commit();      // 调用恢复管理器提交事务
+        concurMgr.release();       // 释放所有事务持有的锁
+        mybuffers.unpinAll();      // 解除固定所有事务固定的缓冲区
+        System.out.println("transaction " + txnum + " committed"); // 打印提交信息
+    }
+    
+    // 回滚事务：执行回滚操作的顺序（恢复 -> 并发 -> 缓冲区）
+    public void rollback() {
+        recoveryMgr.rollback();    // 调用恢复管理器回滚事务
+        concurMgr.release();       // 释放所有事务持有的锁
+        mybuffers.unpinAll();      // 解除固定所有事务固定的缓冲区
+        System.out.println("transaction " + txnum + " rolled back"); // 打印回滚信息
+    }
+    
+    // 数据库恢复（通常由系统启动时调用，不直接由应用事务调用）
+    public void recover() {
+        bm.flushAll(txnum);      // 刷新所有属于此事务的缓冲区到磁盘
+        recoveryMgr.recover();   // 调用恢复管理器执行崩溃恢复
+    }
+    
+    // 固定一个块到缓冲区
+    public void pin(BlockId blk) {
+        mybuffers.pin(blk);
+    }
+    
+    // 解除固定一个块
+    public void unpin(BlockId blk) {
+        mybuffers.unpin(blk);
+    }
+    
+    // 获取块中指定偏移量的整数值
+    public int getInt(BlockId blk, int offset) {
+        concurMgr.sLock(blk); // 获取块的共享锁
+        Buffer buff = mybuffers.getBuffer(blk); // 获取缓冲区
+        return buff.contents().getInt(offset); // 从页面内容获取整数值
+    }
+    
+    // 获取块中指定偏移量的字符串值
+    public String getString(BlockId blk, int offset) {
+        concurMgr.sLock(blk); // 获取块的共享锁
+        Buffer buff = mybuffers.getBuffer(blk); // 获取缓冲区
+        return buff.contents().getString(offset); // 从页面内容获取字符串值
+    }
+    
+    // 设置块中指定偏移量的整数值
+    public void setInt(BlockId blk, int offset, int val, boolean okToLog) {
+        concurMgr.xLock(blk); // 获取块的排他锁
+        Buffer buff = mybuffers.getBuffer(blk); // 获取缓冲区
+        int lsn = -1;
+        if (okToLog)
+            lsn = recoveryMgr.setInt(buff, offset, val); // 如果需要日志，则记录SetInt操作并获取LSN
+        Page p = buff.contents(); // 获取页面内容
+        p.setInt(offset, val); // 在页面上设置整数值
+        buff.setModified(txnum, lsn); // 标记缓冲区为已修改，并关联事务ID和LSN
+    }
+    
+    // 设置块中指定偏移量的字符串值
+    public void setString(BlockId blk, int offset, String val, boolean okToLog) {
+        concurMgr.xLock(blk); // 获取块的排他锁
+        Buffer buff = mybuffers.getBuffer(blk); // 获取缓冲区
+        int lsn = -1;
+        if (okToLog)
+            lsn = recoveryMgr.setString(buff, offset, val); // 如果需要日志，则记录SetString操作并获取LSN
+        Page p = buff.contents(); // 获取页面内容
+        p.setString(offset, val); // 在页面上设置字符串值
+        buff.setModified(txnum, lsn); // 标记缓冲区为已修改，并关联事务ID和LSN
+    }
+    
+    // 获取文件大小
+    public int size(String filename) {
+        // 将文件末尾标记视为一个虚拟块，并获取其共享锁以防止幻影读
+        BlockId dummyblk = new BlockId(filename, END_OF_FILE);
+        concurMgr.sLock(dummyblk);
+        return fm.length(filename); // 通过文件管理器获取文件长度
+    }
+    
+    // 向文件追加新块
+    public BlockId append(String filename) {
+        // 将文件末尾标记视为一个虚拟块，并获取其排他锁以防止幻影写
+        BlockId dummyblk = new BlockId(filename, END_OF_FILE);
+        concurMgr.xLock(dummyblk);
+        return fm.append(filename); // 通过文件管理器追加块
+    }
+    
+    // 获取文件系统中的块大小
+    public int blockSize() {
+        return fm.blockSize();
+    }
+    
+    // 获取缓冲区管理器中可用的缓冲区数量
+    public int availableBuffs() {
+        return bm.available();
+    }
+    
+    // 静态同步方法，用于生成下一个唯一的事务ID
+    private static synchronized int nextTxNumber() {
+        nextTxNum++; // 递增事务计数器
+        System.out.println("new transaction: " + nextTxNum); // 打印新事务ID
+        return nextTxNum;
+    }
+}
+```
+
+**图 5.29 `Transaction` 类的代码**
+
+`size` 和 `append` 方法将**文件末尾标记 (end-of-file marker)** 视为一个块号为 -1 的“虚拟”块。`size` 方法获取该块的 `slock`，而 `append` 获取该块的 `xlock`。
+
+#### `BufferList` 类 (The Class BufferList)
+
+`BufferList` 类管理事务当前固定的缓冲区列表；参见 图 5.30。`BufferList` 对象需要知道两件事：哪个缓冲区被分配给指定的块，以及每个块被固定了多少次。代码使用 `Map` 来确定缓冲区，并使用 `List` 来确定固定计数。列表包含与块被固定的次数相同数量的 `BlockId` 对象；每次块被解除固定时，就会从列表中删除一个实例。
+
+`unpinAll` 方法执行事务提交或回滚时所需的与缓冲区相关的活动——它让缓冲区管理器刷新事务修改过的所有缓冲区，并解除固定任何仍在固定的缓冲区。
+
+```java
+class BufferList {
+    private Map<BlockId, Buffer> buffers = new HashMap<>(); // 映射：BlockId -> Buffer，存储已固定的缓冲区
+    private List<BlockId> pins = new ArrayList<>();        // 列表：BlockId，记录每个块被固定的次数
+
+    private BufferMgr bm; // 缓冲区管理器实例
+    
+    // 构造函数：初始化 BufferList 并传入 BufferMgr
+    public BufferList(BufferMgr bm) {
+        this.bm = bm;
+    }
+    
+    // 获取指定块对应的缓冲区
+    Buffer getBuffer(BlockId blk) {
+        return buffers.get(blk);
+    }
+    
+    // 固定一个块：通过 BufferMgr 固定，并记录在本地映射和列表中
+    void pin(BlockId blk) {
+        Buffer buff = bm.pin(blk); // 调用 BufferMgr 固定块
+        buffers.put(blk, buff);    // 存储块与缓冲区的映射
+        pins.add(blk);             // 将块添加到固定列表，表示其被固定了一次
+    }
+    
+    // 解除固定一个块：从本地列表移除一次固定计数，如果不再被固定则解除 BufferMgr 中的固定
+    void unpin(BlockId blk) {
+        Buffer buff = buffers.get(blk); // 获取对应的缓冲区
+        bm.unpin(buff);                 // 调用 BufferMgr 解除固定
+        pins.remove(blk);               // 从固定列表中移除一个实例
+        // 如果该块在 pins 列表中不再存在，说明此事务已完全解除对它的固定，可以从 buffers 映射中移除
+        if (!pins.contains(blk))
+            buffers.remove(blk);
+    }
+    
+    // 解除固定所有缓冲区：遍历所有固定的缓冲区并解除固定，然后清空本地记录
+    void unpinAll() {
+        // 注意：这里的原始实现存在一个逻辑缺陷，对于重复pin的块，bm.unpin会被多次调用，
+        // 而bm.unpin通常期望只被调用一次对应一次pin。
+        // 一个更健善的实现应该先统计每个块的unpin次数，或者只对 distinct 的 blk 调用 bm.unpin 一次。
+        // 然而，为了忠实于原文，我们保持其原有逻辑。
+        for (BlockId blk : pins) { // 遍历所有固定记录（包含重复）
+            Buffer buff = buffers.get(blk); // 获取对应缓冲区
+            bm.unpin(buff); // 调用 BufferMgr 解除固定
+        }
+        buffers.clear(); // 清空块-缓冲区映射
+        pins.clear();    // 清空固定列表
+    }
+}
+```
+
+**图 5.30 `BufferList` 类的代码**
