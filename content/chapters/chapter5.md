@@ -1198,3 +1198,159 @@ public class ConcurrencyMgr {
 另一种可能的粒度是使用**数据记录 (data records)** 作为并发数据项。数据记录由记录管理器处理，这是下一章的主题。SimpleDB 的结构使得并发管理器不理解记录，因此无法锁定它们。然而，一些商业系统（例如 Oracle）的构建使得并发管理器了解记录管理器并可以调用其方法。在这种情况下，数据记录将是一个合理的并发数据项。
 
 尽管数据记录粒度看起来很有吸引力，但它带来了额外的**幻影 (phantoms)** 问题。由于新数据记录可以插入到现有块中，一个从块中读取所有记录的事务需要一种方法来阻止其他事务向该块插入记录。解决方案是让并发管理器也支持**更粗粒度 (coarser-granularity)** 的数据项，例如块或文件。事实上，一些商业系统通过简单地强制事务在执行任何插入操作之前获取文件的排他锁来避免幻影。
+
+### 5.4.9 SimpleDB 并发管理器 (The SimpleDB Concurrency Manager)
+
+SimpleDB 并发管理器通过 `simpledb.tx.concurrency` 包中的 **ConcurrencyMgr** 类实现。并发管理器使用**块级粒度 (block-level granularity)** 实现锁定协议。其 API 如 图 5.26 所示。
+
+```java
+public class ConcurrencyMgr {
+    public ConcurrencyMgr(int txnum); // 构造函数，传入事务 ID
+    public void sLock(Block blk);     // 请求指定块的共享锁
+    public void xLock(Block blk);     // 请求指定块的排他锁
+    public void release();            // 释放所有锁
+}
+```
+
+**图 5.26 SimpleDB 并发管理器的 API**
+
+每个事务都有自己的并发管理器。并发管理器的方法与锁表的方法类似，但它们是事务特定的。每个 `ConcurrencyMgr` 对象都会跟踪其事务持有的锁。`sLock` 和 `xLock` 方法仅在事务尚未持有锁时才向锁表请求锁。`release` 方法在事务结束时调用，以解锁其所有锁。
+
+`ConcurrencyMgr` 类使用了实现 SimpleDB 锁表的 `LockTable` 类。本节的其余部分将探讨这两个类的实现。
+
+#### 5.4.9.1 `LockTable` 类 (The Class LockTable)
+
+`LockTable` 类的代码如 图 5.27 所示。`LockTable` 对象持有一个名为 `locks` 的 `Map` 变量。这个 map 包含当前已分配锁的每个块的条目。条目的值将是一个 `Integer` 对象；值为 -1 表示分配了**排他锁 (exclusive lock)**，而正值表示当前分配的**共享锁 (shared lock)** 的数量。
+
+`sLock` 和 `xLock` 方法的工作方式与 `BufferMgr` 的 `pin` 方法非常相似。每个方法都在循环内调用 Java 的 `wait` 方法，这意味着只要循环条件成立，客户端线程就会被持续地放置在等待列表中。`sLock` 的循环条件调用 `hasXlock` 方法，如果块在 `locks` 中有一个值为 -1 的条目，则该方法返回 true。`xLock` 的循环条件调用 `hasOtherSLocks` 方法，如果块在 `locks` 中有一个大于 1 的条目，则该方法返回 true。其原理是并发管理器在请求排他锁之前总是会先获取块的共享锁，因此大于 1 的值表示其他事务也持有该块的锁。
+
+```java
+class LockTable {
+    private static final long MAX_TIME = 10000; // 10 秒
+    private Map<Block, Integer> locks = new HashMap<Block, Integer>(); // 存储块及其锁状态
+
+    // 请求共享锁
+    public synchronized void sLock(Block blk) {
+        try {
+            long timestamp = System.currentTimeMillis();
+            // 如果块有排他锁且当前线程等待时间未超过最大时间，则等待
+            while (hasXlock(blk) && !waitingTooLong(timestamp))
+                wait(MAX_TIME); // 等待 MAX_TIME 毫秒或直到被通知
+            // 如果等待超时后仍然有排他锁，则抛出异常
+            if (hasXlock(blk))
+                throw new LockAbortException();
+            int val = getLockVal(blk); // 获取当前锁值（不会是负数，因为有排他锁时已等待）
+            locks.put(blk, val + 1); // 增加共享锁计数
+        } catch (InterruptedException e) {
+            throw new LockAbortException(); // 捕获中断异常并抛出锁中止异常
+        }
+    }
+
+    // 请求排他锁
+    public synchronized void xLock(Block blk) {
+        try {
+            long timestamp = System.currentTimeMillis();
+            // 如果块有其他共享锁（不止一个）且当前线程等待时间未超过最大时间，则等待
+            while (hasOtherSLocks(blk) && !waitingTooLong(timestamp))
+                wait(MAX_TIME); // 等待 MAX_TIME 毫秒或直到被通知
+            // 如果等待超时后仍然有其他共享锁，则抛出异常
+            if (hasOtherSLocks(blk))
+                throw new LockAbortException();
+            locks.put(blk, -1); // 设置为排他锁（-1）
+        } catch (InterruptedException e) {
+            throw new LockAbortException(); // 捕获中断异常并抛出锁中止异常
+        }
+    }
+
+    // 释放锁
+    public synchronized void unlock(Block blk) {
+        int val = getLockVal(blk);
+        if (val > 1) { // 如果是多个共享锁中的一个，则减少计数
+            locks.put(blk, val - 1);
+        } else { // 如果是排他锁或唯一的共享锁，则移除锁
+            locks.remove(blk);
+            notifyAll(); // 通知所有等待此对象（LockTable）的线程
+        }
+    }
+
+    // 检查块是否持有排他锁
+    private boolean hasXlock(Block blk) {
+        return getLockVal(blk) < 0; // 负值表示排他锁
+    }
+
+    // 检查块是否持有除了当前事务以外的其他共享锁（即共享锁计数大于 1）
+    private boolean hasOtherSLocks(Block blk) {
+        return getLockVal(blk) > 1; // 大于 1 表示有其他共享锁
+    }
+
+    // 检查等待时间是否过长
+    private boolean waitingTooLong(long starttime) {
+        return System.currentTimeMillis() - starttime > MAX_TIME;
+    }
+
+    // 获取块的当前锁值，如果没有锁则返回 0
+    private int getLockVal(Block blk) {
+        Integer ival = locks.get(blk);
+        return (ival == null) ? 0 : ival.intValue();
+    }
+}
+```
+
+**图 5.27 SimpleDB 类 LockTable 的代码**
+
+`unlock` 方法要么从 `locks` 集合中移除指定的锁（如果它是排他锁或只有一个事务持有的共享锁），要么减少仍在共享该锁的事务数量。如果锁从集合中移除，该方法会调用 Java 的 `notifyAll` 方法，这将把所有等待的线程移动到可调度列表。Java 内部的线程调度器以某种未指定顺序恢复每个线程。可能有很多线程正在等待同一个被释放的锁。当线程恢复时，它可能会发现它想要的锁仍然不可用，并将自己再次放置在等待列表中。
+
+这段代码在线程通知管理方面效率不高。`notifyAll` 方法移动所有等待的线程，包括等待其他锁的线程。这些线程在被调度时，会（当然）发现它们的锁仍然不可用，并会将自己放回等待列表。一方面，如果并发运行的冲突数据库线程相对较少，这种策略的开销不会太大。另一方面，一个数据库引擎应该比这更复杂。练习 5.53–5.54 要求您改进等待/通知机制。
+
+#### 5.4.9.2 `ConcurrencyMgr` 类 (The Class ConcurrencyMgr)
+
+`ConcurrencyMgr` 类的代码如 图 5.28 所示。尽管每个事务都有一个并发管理器，但它们都需要使用同一个锁表。
+
+```java
+public class ConcurrencyMgr {
+    // 静态变量，所有 ConcurrencyMgr 对象共享同一个 LockTable 实例
+    private static LockTable locktbl = new LockTable();
+    // 当前事务持有的锁的本地记录，键是块，值是锁类型 ("S" 或 "X")
+    private Map<Block, String> locks = new HashMap<Block, String>();
+
+    // 请求块的共享锁
+    public void sLock(Block blk) {
+        // 如果当前事务尚未持有该块的锁
+        if (locks.get(blk) == null) {
+            locktbl.sLock(blk); // 向全局 LockTable 请求共享锁
+            locks.put(blk, "S"); // 记录当前事务持有的共享锁
+        }
+    }
+
+    // 请求块的排他锁
+    public void xLock(Block blk) {
+        // 如果当前事务尚未持有该块的排他锁
+        if (!hasXLock(blk)) {
+            sLock(blk); // 首先获取共享锁（如果尚未持有）
+            locktbl.xLock(blk); // 向全局 LockTable 请求排他锁
+            locks.put(blk, "X"); // 记录当前事务持有的排他锁
+        }
+    }
+
+    // 释放当前事务持有的所有锁
+    public void release() {
+        // 遍历当前事务持有的所有块
+        for (Block blk : locks.keySet()) {
+            locktbl.unlock(blk); // 调用全局 LockTable 的 unlock 方法释放锁
+        }
+        locks.clear(); // 清空本地锁记录
+    }
+
+    // 检查当前事务是否持有指定块的排他锁
+    private boolean hasXLock(Block blk) {
+        String locktype = locks.get(blk);
+        return locktype != null && locktype.equals("X");
+    }
+}
+```
+
+**图 5.28 SimpleDB 类 ConcurrencyMgr 的代码**
+
+这个要求通过让每个 `ConcurrencyMgr` 对象共享一个**静态 (static)** `LockTable` 变量来实现。事务持有的锁的描述保存在局部变量 `locks` 中。这个变量保存了一个 map，其中包含每个被锁定块的条目。与条目关联的值是 “S” 或 “X”，取决于该块上是共享锁还是排他锁。
+
+`sLock` 方法首先检查事务是否已经持有该块的锁；如果是，则无需访问锁表。否则，它调用锁表的 `sLock` 方法并等待锁的授予。如果事务已经持有该块的排他锁，`xLock` 方法则不需要做任何事情。如果不是，该方法首先获取该块的共享锁，然后获取排他锁。（回想一下，锁表的 `xLock` 方法假定事务已经持有共享锁。）请注意，排他锁比共享锁“更强”，从某种意义上说，一个事务如果在一个块上持有排他锁，则它也隐式地持有该块的共享锁。
