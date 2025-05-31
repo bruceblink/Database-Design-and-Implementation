@@ -946,3 +946,118 @@ public class RID {
 ```
 
 **Fig. 6.20 The code for the SimpleDB class RID (Fig. 6.20 SimpleDB 类 RID 的代码)**
+
+## 6.5 章总结 (Chapter Summary)
+
+- 记录管理器
+
+  是数据库系统中负责在文件中存储记录的部分。它有三个基本职责：
+
+  - 在记录内部放置字段。
+  - 在块内部放置记录。
+  - 提供对文件中记录的访问。
+
+在设计记录管理器时，有几个问题必须解决。
+
+- 一个问题是是否支持**变长字段**。定长记录可以轻松实现，因为字段可以在原地更新。更新变长字段可能导致记录溢出块并被放置到溢出块中。
+- SQL 有三种不同的字符串类型：`char`、`varchar` 和 `clob`。
+  - **`char`** 类型最自然地使用定长表示实现。
+  - **`varchar`** 类型最自然地使用变长表示实现。
+  - **`clob`** 类型最自然地使用存储字符串到辅助文件中的定长表示实现。
+- **变长记录**的一种常见实现技术是使用 **ID 表**。表中的每个条目指向页面中的一条记录。记录可以通过仅更改其在 ID 表中的条目而在页面中移动。
+- 第二个问题是是否创建**跨块记录**。跨块记录很有用，因为它们不浪费空间并允许存储大记录，但实现起来更复杂。
+- 第三个问题是是否允许文件中存在**非同构记录**。非同构记录允许相关记录在同一页面上聚簇。**聚簇**可以带来非常高效的连接操作，但往往会使其他查询变得更昂贵。记录管理器可以通过在每条记录的开头存储一个**标签字段**来实现非同构记录；该标签表示记录所属的表。
+- 第四个问题是如何确定记录中每个字段的**偏移量**。记录管理器可能需要**填充**字段，以便它们对齐到适当的字节边界。定长记录中的字段在每条记录中具有相同的偏移量。可能需要搜索变长记录以找到其字段的开头。
+
+## 6.6 建议阅读 (Suggested Reading)
+
+本章中的思想和技术从关系数据库的最初就已存在。Stonebraker et al. (1976) 的第 3.3 节描述了第一个版本 INGRES 所采用的方法；该方法使用了第 6.2.2 节中描述的 ID 表的变体。Astrahan et al. (1976) 的第 3 节描述了早期 System R 数据库系统（后来成为 IBM 的 DB2 产品）的页面结构，该系统非同构地存储记录。这两篇文章都讨论了广泛的实现思想，非常值得通读。Gray and Reuter (1993) 第 14 章更详细地讨论了这些技术，并提供了示例记录管理器的基于 C 语言的实现。将每条记录连续存储在一个页面中的策略不一定是最好的。
+
+Ailamaki et al. (2002) 的文章主张将页面上的记录分解开，并将每个字段的值放在一起。尽管这种记录组织方式不会改变记录管理器执行的磁盘访问次数，但它显著提高了 CPU 的性能，因为其数据缓存得到了更有效的利用。Stonebraker et al. (2005) 的文章更进一步，提出表应该按字段值组织，即每个字段的所有记录值都应该存储在一起。该文章展示了基于字段的存储如何比基于记录的存储更紧凑，这可以带来更高效的查询。Carey et al. (1986) 描述了一种针对超大记录的实现策略。
+
+Ailamaki, A., DeWitt, D., & Hill, M. (2002). Data page layouts for relational databases on deep memory hierarchies. VLDB Journal, 11(3), 198–215.
+
+Astrahan, M., Blasgen, M., Chamberlin, D., Eswaren, K., Gray, J., Griffiths, P.,King, W., Lorie, R., McJones, P., Mehl, J., Putzolu, G., Traiger, I., Wade, B., & Watson, V. (1976). System R: Relational approach to database management.
+
+ACM Transactions on Database Systems, 1(2), 97–137.
+
+Carey, M., DeWitt, D., Richardson, J., & Shekita, E. (1986). Object and file management in the EXODUS extendable database system. In Proceedings of the VLDB Conference (pp. 91–100).
+
+Gray, J., & Reuter, A. (1993). Transaction processing: concepts and techniques. San Mateo, CA: Morgan Kaufman.
+
+Stonebraker, M., Abadi, D., Batkin, A., Chen, X., Cherniack, M., Ferreira, M., Lau,E., Lin, A., Madden, S., O’Neil, E., O’Neil, P., Rasin, A., Tran, N., & Zdonik,S. (2005). C-Store: A column-oriented DBMS. In Proceedings of the VLDB Conference (pp. 553–564).
+
+Stonebraker, M., Kreps, P., Wong, E., & Held, G. (1976). The design and imple- mentation of INGRES. ACM Transactions on Database Systems, 1(3), 189–222.
+
+## 6.7 练习 (Exercises)
+
+### 概念问题 (Conceptual Problems)
+
+6.1. 假设块大小为 400 字节，并且记录不能跨块。计算 SimpleDB 记录页中可容纳的最大记录数以及在以下槽位大小下页面中浪费的空间量：10 字节、20 字节、50 字节和 100 字节。
+
+6.2. 解释表的文件如何包含没有记录的块。
+
+6.3. 考虑大学数据库中的每个表（除了 STUDENT）。
+
+(a) 给出该表的布局，如 Fig. 6.6 所示。（您可以使用演示客户端文件中的 varchar 声明，或者假设所有字符串字段都定义为 varchar(20)。）
+
+(b) 使用 Fig. 1.1 中的记录，绘制每个表的记录页面图（如 Fig. 6.5 所示）。如 Fig. 6.5 所示，假设空/满标志是一个字节长。还假设字符串字段是定长实现。
+
+(c) 完成 (b) 部分，但假设字符串字段是变长实现。使用 Fig. 6.8c 作为模型。
+
+(d) 修改 (b) 和 (c) 部分的图片，以显示其第二条记录被删除后页面的状态。
+
+6.4. 处理超大字符串的另一种方法是将其不存储在数据库中。相反，您可以将字符串放在操作系统文件中，并将文件名称存储在数据库中。这种策略将消除对 clob 类型的需求。
+
+给出几个理由说明为什么这种策略不是特别好。
+
+6.5. 假设您想将一条记录插入到一个包含溢出块的块中，如 Fig. 6.7b 所示。将记录保存在溢出块中是个好主意吗？解释。
+
+6.6. 这是实现变长记录的另一种方法。每个块有两个区域：一系列定长槽位（如 SimpleDB 中）和存储变长值的地方。记录存储在槽位中。其定长值与记录一起存储，其变长值存储在值区域。记录将包含值所在块的偏移量。例如，Fig. 6.8a 中的记录可以这样存储：
+
+(a) 解释当变长值被修改时应该发生什么。您需要溢出块吗？如果需要，它应该是什么样子？
+
+(b) 将此存储策略与 ID 表进行比较。解释各自的比较优势。
+
+(c) 您更喜欢哪种实现策略？为什么？
+
+6.7. 使用一个字节表示每个空/使用中标志浪费了空间，因为只需要一个位。另一种实现策略是在块的开头，用位数组存储每个槽位的空/使用中位。这个位数组可以实现为一个或多个 4 字节整数。
+
+(a) 将此位数组与 Fig. 6.8c 中的 ID 表进行比较。
+
+(b) 假设块大小为 4K，记录至少为 15 字节。存储位数组需要多少个整数？
+
+(c) 描述一个查找空槽位以插入新记录的算法。
+
+(d) 描述一个查找块中下一个非空记录的算法。
+
+### 编程问题 (Programming Problems)
+
+6.8. 修改 RecordPage 类，使其块不在构造函数中被 pin，而是在每个 get/set 方法的开头被 pin。类似地，块在每个 get/set 方法的末尾被 unpin，从而消除了对 close 方法的需求。您认为这比 SimpleDB 的实现更好吗？解释。
+
+6.9. 修改记录管理器，使 varchar 字段具有变长实现。
+
+6.10. SimpleDB 只知道如何向前读取文件。
+
+(a) 修改 TableScan 和 RecordPage 类以支持 previous 方法，以及 afterLast 方法，该方法将当前记录定位到文件（或页面）中最后一条记录之后。
+
+(b) 修改 TableScanTest 程序以反向打印其记录。
+
+6.11. 修改记录管理器，使记录跨块。
+
+6.12. 修改 Layout 类，填充字符串字段，使其大小始终是 4 的倍数。
+
+6.13. 修改 SimpleDB 记录管理器以处理空字段值。由于使用特定的整数或字符串值来表示空是不合理的，您应该使用标志来指定哪些值为空。具体来说，假设一条记录包含 N 个字段。那么您可以为每条记录存储 N 个额外的位，使得第 i 个位的值为 1 当且仅当第 i 个字段的值为空。假设 N<32，空/使用中整数可以用于此目的。该整数的第 0 位表示空/使用中，如前所述。但现在其他位包含空值信息。您应该对代码进行以下修改：
+
+- 修改 `Layout`，使其具有一个 `bitLocation(fldname)` 方法，该方法返回字段空信息位在标志中的位置。
+
+- 修改 `RecordPage` 和 `TableScan`，使其具有两个额外的公共方法：一个 `void` 方法 `setNull(fldname)`，它在标志的适当位中存储 1；以及一个 `boolean` 方法 `isNull(fldname)`，如果当前记录指定字段的空位为 1，则返回 `true`。
+
+- 修改 `RecordPage` 的 `format` 方法，以明确将新记录的字段设置为非空。
+
+- 修改 `setString` 和 `setInt` 方法，将指定字段设置为非空。 6.14. 假设 `setString` 被调用时，传入的字符串长度超过了模式中指定的长度。 (a) 解释可能出现哪些问题以及何时会被检测到。 (b) 修复 SimpleDB 代码，以便检测并适当地处理该错误。
+
+6.14. 假设调用 `setString` 方法时传入的字符串长度超过了模式中指定的长度。
+   (a) 解释可能出现什么类型的问题以及何时会被检测到。
+
+   (b) 修复 SimpleDB 代码，以便检测并适当地处理该错误。
