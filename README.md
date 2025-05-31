@@ -84,7 +84,7 @@ database-design-and-implementation/
    - 4.7 建议阅读（Suggested Reading）
    - 4.8 习题（Exercises）
 
-5. ### 事务管理（Transaction Management）
+5. ### [事务管理（Transaction Management）](content/chapters/chapter5.md#第-5-章-事务管理-chapter-5-transaction-management)
 
    - 5.1 事务（Transactions）
    - 5.2 在 SimpleDB 中使用事务（Using Transactions in SimpleDB）
@@ -263,7 +263,7 @@ npm run start
 - [x] 第3章：磁盘与文件管理（Disk and File Management）
 - [x] 第4章：内存管理（Memory Management）
 - [x] 第5章： 事务管理（Transaction Management）
-- [ ] 第6章： 记录管理（Record Management）
+- [x] 第6章： 记录管理（Record Management）
 - [ ] 第7章： 元数据管理（Metadata Management）
 - [ ] 第8章： 查询处理（Query Processing）
 - [ ] 第9章： 解析（Parsing）
@@ -306,7 +306,7 @@ npm run start
 
 ![部署状态](https://img.shields.io/github/deployments/BruceBlink/database-design-and-implementation/Production?label=vercel&logo=vercel)
 ![最近更新](https://img.shields.io/github/last-commit/BruceBlink/database-design-and-implementation?label=最近更新)
-![翻译进度](https://img.shields.io/badge/翻译进度-36%25-green)
+![翻译进度](https://img.shields.io/badge/翻译进度-42%25-green)
 ![维护状态](https://img.shields.io/badge/维护状态-积极维护-brightgreen)
 ![许可证](https://img.shields.io/badge/许可证-MIT-blue)
 
