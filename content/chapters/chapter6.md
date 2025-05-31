@@ -252,13 +252,9 @@ for (String fldname : layout.schema().fields()) {
 }
 ```
 
-------
-
 ### 6.3.2 实现 `Schema` 和 `Layout` (Implementing the Schema and Layout)
 
 **`Schema` 类** 的代码非常直接，如 图 6.12 所示。在内部，该类将三元组存储在以字段名作为键的 `Map` 中。与字段名关联的对象属于私有内部类 `FieldInfo`，它封装了字段的长度和类型。
-
-------
 
 **图 6.12 SimpleDB `Schema` 类的代码 (The code for SimpleDB class Schema)**
 
@@ -597,3 +593,356 @@ public class RecordPage {
 ```
 
 私有方法 `offset` 使用槽大小来计算记录槽的起始位置。`get/set` 方法通过将字段的偏移量（从 `Layout` 获取）添加到记录的偏移量来计算其指定字段的位置。`nextAfter` 和 `insertAfter` 方法分别调用私有方法 `searchAfter` 来查找具有指定标志（`USED` 或 `EMPTY`）的槽。`searchAfter` 方法会重复递增指定的槽号，直到找到具有指定标志的槽或用完槽。`delete` 方法将指定槽的标志设置为 `EMPTY`，而 `insertAfter` 将找到的槽的标志设置为 `USED`。
+
+好的，我将再次调整格式，确保英文原文标题不包含编号，而中文翻译部分保留原有的章节编号。代码部分将保持中文注释。
+
+## 6.4 SimpleDB 表扫描 (SimpleDB Table Scans)
+
+一个记录页管理一个记录块。本节将探讨**表扫描**，它可以在文件的多个块中存储任意数量的记录。
+
+### 6.4.1 表扫描 (Table Scans)
+
+`TableScan` 类管理表中的记录。其 API 如 Fig. 6.17 所示。一个 `TableScan` 对象会跟踪一个**当前记录**，其方法可以改变当前记录并访问其内容。`beforeFirst` 方法将当前记录定位到文件中的第一条记录之前，而 `next` 方法将当前记录定位到文件中的下一条记录。如果当前块中没有更多记录，那么 `next` 将读取文件中的后续块，直到找到另一条记录。如果无法找到更多记录，则调用 `next` 将返回 `false`。
+
+```java
+TableScan
+public class TableScan {
+    // 构造函数，初始化TableScan对象
+    public TableScan(Transaction tx, String tblname, Layout layout) { /* ... */ }
+    // 关闭TableScan
+    public void close() { /* ... */ }
+    // 检查字段是否存在
+    public boolean hasField(String fldname) { /* ... */ }
+
+    // methods that establish the current record (建立当前记录的方法)
+    // 将当前记录定位到文件中的第一条记录之前
+    public void beforeFirst() { /* ... */ }
+    // 将当前记录定位到文件中的下一条记录，如果成功则返回true
+    public boolean next() { /* ... */ }
+    // 将当前记录定位到指定的记录标识符（RID）
+    public void moveToRid(RID r) { /* ... */ }
+    // 插入一条新记录
+    public void insert() { /* ... */ }
+
+    // methods that access the current record (访问当前记录的方法)
+    // 获取当前记录中指定字段的整数值
+    public int getInt(String fldname) { /* ... */ }
+    // 获取当前记录中指定字段的字符串值
+    public String getString(String fldname) { /* ... */ }
+    // 设置当前记录中指定字段的整数值
+    public void setInt(String fldname, int val) { /* ... */ }
+    // 设置当前记录中指定字段的字符串值
+    public void setString(String fldname, String val) { /* ... */ }
+    // 返回当前记录的记录标识符（RID）
+    public RID currentRid() { /* ... */ }
+    // 删除当前记录
+    public void delete() { /* ... */ }
+}
+```
+
+```java
+RID
+public class RID {
+    // 构造函数，根据块号和槽位创建RID对象
+    public RID(int blknum, int slot) { /* ... */ }
+    // 获取记录所在的块号
+    public int blockNumber() { /* ... */ }
+    // 获取记录在块中的槽位
+    public int slot() { /* ... */ }
+}
+```
+
+Fig. 6.17 The API for SimpleDB table scans (Fig. 6.17 SimpleDB 表扫描的 API)
+
+`get/set` 和 `delete` 方法应用于当前记录。`insert` 方法在文件的某个位置插入一条新记录，从当前记录所在的块开始。与 `RecordPage` 的插入方法不同，此插入方法总是成功；如果它无法在文件中现有块中找到插入记录的位置，它会向文件中追加一个新块并将记录插入其中。
+
+文件中的每条记录都可以通过一对值来标识：它在文件中的**块号**以及在块中的**槽位**。这两个值被称为**记录标识符 (rid)**。`RID` 类实现了这些记录标识符。其类构造函数保存这两个值；访问器方法 `blockNumber` 和 `slot` 则检索它们。
+
+`TableScan` 类包含两个与 `rid` 交互的方法。`moveToRid` 方法将当前记录定位到指定的 `rid`，而 `currentRid` 方法返回当前记录的 `rid`。
+
+`TableScan` 类提供了一个与您目前所见的其它类显著不同的抽象层次。也就是说，`Page`、`Buffer`、`Transaction` 和 `RecordPage` 的方法都适用于特定的块。而 `TableScan` 类则向其客户端隐藏了块结构。通常，客户端不会知道（或关心）当前正在访问哪个块。
+
+```java
+public class TableScanTest {
+    public static void main(String[] args) throws Exception {
+        // 创建SimpleDB实例，数据库名为"tabletest"，缓冲区大小400，块大小8
+        SimpleDB db = new SimpleDB("tabletest", 400, 8);
+        // 开始一个新事务
+        Transaction tx = db.newTx();
+        // 创建一个Schema（模式）对象
+        Schema sch = new Schema();
+        // 向模式中添加一个名为"A"的整型字段
+        sch.addIntField("A");
+        // 向模式中添加一个名为"B"的字符串字段，最大长度为9
+        sch.addStringField("B", 9);
+        // 根据模式创建一个Layout（布局）对象
+        Layout layout = new Layout(sch);
+        // 遍历布局中所有字段的名称，并打印其偏移量
+        for (String fldname : layout.schema().fields()) {
+            int offset = layout.offset(fldname);
+            System.out.println(fldname + " has offset " + offset);
+        }
+        // 创建一个TableScan对象，用于表"T"
+        TableScan ts = new TableScan(tx, "T", layout);
+        System.out.println("Filling the table with 50 random records."); // 填充表，共50条随机记录。
+        // 将当前记录定位到文件中的第一条记录之前
+        ts.beforeFirst();
+        // 循环插入50条随机记录
+        for (int i=0; i<50; i++) {
+            // 插入一条新记录
+            ts.insert();
+            // 生成一个0到50之间的随机整数
+            int n = (int) Math.round(Math.random() * 50);
+            // 设置字段"A"的值
+            ts.setInt("A", n);
+            // 设置字段"B"的值
+            ts.setString("B", "rec"+n);
+            // 打印插入的记录信息，包括记录的RID和内容
+            System.out.println("inserting into slot " + ts.currentRid() + ": {" // 插入到槽位
+                    + n + ", " + "rec"+n + "}");
+        }
+        System.out.println("Deleting records with A-values < 25."); // 删除 A 值小于 25 的记录。
+        int count = 0;
+        // 将当前记录定位到文件中的第一条记录之前
+        ts.beforeFirst();
+        // 遍历所有记录
+        while (ts.next()) {
+            // 获取字段"A"的值
+            int a = ts.getInt("A");
+            // 获取字段"B"的值
+            String b = ts.getString("B");
+            // 如果A的值小于25，则删除该记录
+            if (a < 25) {
+                count++;
+                System.out.println("slot " + ts.currentRid() + ": {"+ a + ", " + b + "}"); // 槽位
+                // 删除当前记录
+                ts.delete();
+            }
+        }
+        System.out.println(count + " values under 10 were deleted.\n"); // 个小于 10 的值被删除了。
+        System.out.println("Here are the remaining records."); // 以下是剩余记录。
+        // 将当前记录定位到文件中的第一条记录之前
+        ts.beforeFirst();
+        // 遍历并打印所有剩余的记录
+        while (ts.next()) {
+            int a = ts.getInt("A");
+            String b = ts.getString("B");
+            System.out.println("slot " + ts.currentRid() +": {" + a + ", " + b + "}"); // 槽位
+        }
+        // 关闭TableScan
+        ts.close();
+        // 提交事务
+        tx.commit();
+    }
+}
+```
+
+Fig. 6.18 Testing the table scan (Fig. 6.18 测试表扫描)
+
+Fig. 6.18 中的 `TableScanTest` 类展示了表扫描的使用。该代码类似于 `RecordTest`，不同之处在于它向文件中插入了 50 条记录。对 `ts.insert` 的调用将分配必要的块来容纳这些记录。在本例中，将分配三个块（每个块 18 条记录）。然而，代码并不知道正在发生这些事情。如果您多次运行此代码，您会发现文件又插入了 50 条记录，并且它们填充了之前删除记录所遗弃的槽位。
+
+### 6.4.2 实现表扫描 (Implementing Table Scans)
+
+`TableScan` 类的代码如 Fig. 6.19 所示。一个 `TableScan` 对象持有其当前块的记录页。`get/set/delete` 方法只是简单地调用记录页的相应方法。当当前块改变时，会调用私有方法 `moveToBlock`；该方法关闭当前记录页，并为指定块打开另一个记录页，将其定位在第一个槽位之前。`next` 方法的算法如下：
+
+1. 移动到当前记录页的下一条记录。
+2. 如果该页中没有更多记录，则移动到文件的下一个块并获取其下一条记录。
+3. 继续直到找到下一条记录或到达文件末尾。 文件中的多个块可能为空（参见练习 6.2），因此调用 `next` 可能需要循环遍历多个块。
+
+`insert` 方法尝试在当前记录之后开始插入一条新记录。如果当前块已满，则它移动到下一个块并继续，直到找到一个空槽位。如果所有块都已满，则它会向文件中追加一个新块并将记录插入其中。
+
+`TableScan` 实现了 `UpdateScan` 接口（并通过扩展也实现了 `Scan` 接口）。这些接口是查询执行的核心，将在第 8 章中讨论。`getVal` 和 `setVal` 方法也将在第 8 章中讨论。它们获取和设置 `Constant` 类型的对象。`Constant` 是值类型（如 `int` 或 `String`）的抽象，它使得表达查询变得更容易，而无需知道给定字段的类型。
+
+`RID` 对象简单地由两个整数组合而成：块号和槽位号。因此，`RID` 类的代码非常直观，如 Fig. 6.20 所示。
+
+```java
+public class TableScan implements UpdateScan {
+    private Transaction tx;     // 事务对象
+    private Layout layout;      // 布局对象
+    private RecordPage rp;      // 当前记录页
+    private String filename;    // 文件名
+    private int currentslot;    // 当前槽位
+
+    // 构造函数
+    public TableScan(Transaction tx, String tblname, Layout layout) {
+        this.tx = tx;
+        this.layout = layout;
+        filename = tblname + ".tbl"; // 构建表文件名
+        // 如果文件大小为0（即文件为空），则移动到一个新块
+        if (tx.size(filename) == 0)
+            moveToNewBlock();
+        else
+            // 否则移动到文件的第一个块（块号为0）
+            moveToBlock(0);
+    }
+
+    // Methods that implement Scan (实现Scan接口的方法)
+    // 关闭TableScan，解除对当前记录页的pin
+    public void close() {
+        if (rp != null)
+            tx.unpin(rp.block());
+    }
+
+    // 将当前记录定位到文件中的第一条记录之前
+    public void beforeFirst() {
+        moveToBlock(0); // 移动到第一个块
+    }
+
+    // 移动到下一条记录
+    public boolean next() {
+        // 在当前记录页中查找下一个槽位
+        currentslot = rp.nextAfter(currentslot);
+        // 如果当前页没有更多记录 (currentslot < 0)
+        while (currentslot < 0) {
+            // 如果已到达文件的最后一个块，则返回false，表示没有更多记录
+            if (atLastBlock())
+                return false;
+            // 否则，移动到文件的下一个块
+            moveToBlock(rp.block().number() + 1);
+            // 在新块中查找下一个槽位
+            currentslot = rp.nextAfter(currentslot);
+        }
+        return true; // 找到下一条记录，返回true
+    }
+
+    // 获取当前记录中指定字段的整数值
+    public int getInt(String fldname) {
+        return rp.getInt(currentslot, fldname);
+    }
+
+    // 获取当前记录中指定字段的字符串值
+    public String getString(String fldname) {
+        return rp.getString(currentslot, fldname);
+    }
+
+    // 获取当前记录中指定字段的Constant类型值
+    public Constant getVal(String fldname) {
+        // 根据字段类型返回IntConstant或StringConstant
+        if (layout.schema().type(fldname) == INTEGER)
+            return new IntConstant(getInt(fldname));
+        else
+            return new StringConstant(getString(fldname));
+    }
+
+    // 检查模式中是否包含指定字段
+    public boolean hasField(String fldname) {
+        return layout.schema().hasField(fldname);
+    }
+
+    // Methods that implement UpdateScan (实现UpdateScan接口的方法)
+    // 设置当前记录中指定字段的整数值
+    public void setInt(String fldname, int val) {
+        rp.setInt(currentslot, fldname, val);
+    }
+
+    // 设置当前记录中指定字段的字符串值
+    public void setString(String fldname, String val) {
+        rp.setString(currentslot, fldname, val);
+    }
+
+    // 设置当前记录中指定字段的Constant类型值
+    public void setVal(String fldname, Constant val) {
+        // 根据字段类型将Constant值转换为Java基本类型并设置
+        if (layout.schema().type(fldname) == INTEGER)
+            setInt(fldname, (Integer) val.asJavaVal());
+        else
+            setString(fldname, (String) val.asJavaVal());
+    }
+
+    // 插入一条新记录
+    public void insert() {
+        // 尝试在当前槽位之后插入新记录
+        currentslot = rp.insertAfter(currentslot);
+        // 如果当前块已满 (currentslot < 0)
+        while (currentslot < 0) {
+            // 如果已到达文件的最后一个块，则追加一个新块
+            if (atLastBlock())
+                moveToNewBlock();
+            else
+                // 否则，移动到文件的下一个块
+                moveToBlock(rp.block().number() + 1);
+            // 在新块中尝试插入新记录
+            currentslot = rp.insertAfter(currentslot);
+        }
+    }
+
+    // 删除当前记录
+    public void delete() {
+        rp.delete(currentslot);
+    }
+
+    // 移动到指定的RID（记录标识符）
+    public void moveToRid(RID rid) {
+        close(); // 关闭当前记录页
+        BlockId blk = new BlockId(filename, rid.blockNumber()); // 根据RID的块号创建BlockId
+        rp = new RecordPage(tx, blk, layout); // 为该块创建RecordPage
+        currentslot = rid.slot(); // 设置当前槽位
+    }
+
+    // 获取当前记录的RID
+    public RID getRid() {
+        return new RID(rp.block().number(), currentslot);
+    }
+
+    // Private auxiliary methods (私有辅助方法)
+    // 移动到指定的块号
+    private void moveToBlock(int blknum) {
+        close(); // 关闭当前记录页
+        BlockId blk = new BlockId(filename, blknum); // 创建目标块的BlockId
+        rp = new RecordPage(tx, blk, layout); // 为目标块创建RecordPage
+        currentslot = -1; // 将当前槽位重置为-1（在第一个槽位之前）
+    }
+
+    // 移动到一个新块（追加新块到文件末尾）
+    private void moveToNewBlock() {
+        close(); // 关闭当前记录页
+        BlockId blk = tx.append(filename); // 向文件追加一个新块并获取其BlockId
+        rp = new RecordPage(tx, blk, layout); // 为新块创建RecordPage
+        rp.format(); // 格式化新块
+        currentslot = -1; // 将当前槽位重置为-1
+    }
+
+    // 检查是否已到达文件的最后一个块
+    private boolean atLastBlock() {
+        return rp.block().number() == tx.size(filename) - 1;
+    }
+}
+```
+
+**Fig. 6.19 The code for the SimpleDB class TableScan ( SimpleDB 类 TableScan 的代码)**
+
+```java
+public class RID {
+    private int blknum; // 块号
+    private int slot;   // 槽位
+
+    // 构造函数
+    public RID(int blknum, int slot) {
+        this.blknum = blknum;
+        this.slot = slot;
+    }
+
+    // 获取块号
+    public int blockNumber() {
+        return blknum;
+    }
+
+    // 获取槽位
+    public int slot() {
+        return slot;
+    }
+
+    // 重写equals方法，用于比较两个RID对象是否相等
+    public boolean equals(Object obj) {
+        RID r = (RID) obj; // 将传入对象转换为RID类型
+        return blknum == r.blknum && slot == r.slot; // 比较块号和槽位是否都相等
+    }
+
+    // 重写toString方法，返回RID的字符串表示形式
+    public String toString() {
+        return "[" + blknum + ", " + slot + "]";
+    }
+}
+```
+
+**Fig. 6.20 The code for the SimpleDB class RID (Fig. 6.20 SimpleDB 类 RID 的代码)**
