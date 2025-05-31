@@ -95,7 +95,7 @@ database-design-and-implementation/
    - 5.7 建议阅读（Suggested Reading）
    - 5.8 习题（Exercises）
 
-6. ### 记录管理（Record Management）
+6. ### [记录管理（Record Management）](content/chapters/chapter6.md#第-6-章-记录管理-record-management)
 
    - 6.1 记录管理器设计（Designing a Record Manager）
    - 6.2 记录文件的实现（Implementing a File of Records）
