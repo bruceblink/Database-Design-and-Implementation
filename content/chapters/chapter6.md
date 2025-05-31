@@ -195,3 +195,405 @@ ID 表随着块中记录数量的增加而扩展。数组的大小必然是**开
 记录管理器的行为不需要太多改变。当记录管理器访问一条记录时，它会根据标签值确定要使用哪个表信息。然后它可以使用该表来读取或写入任何字段，与同构情况相同。
 
 SimpleDB 中的**日志记录 (log records)** 是非同构记录的一个例子。每个日志记录的第一个值是一个整数，表示日志记录的类型。恢复管理器使用该值来确定如何读取记录的其余部分。
+
+## 6.3 SimpleDB 记录页面 (SimpleDB Record Pages)
+
+接下来的两节将探讨 SimpleDB 的记录管理器，它实现了 6.2.1 节介绍的基本记录管理器。本节涵盖了**记录页面的实现 (implementation of record pages)**，而下一节将介绍如何实现**记录页面文件 (file of record pages)**。本章的一些期末练习会要求您修改它以处理其他设计决策。
+
+### 6.3.1 管理记录信息 (Managing Record Information)
+
+SimpleDB 的记录管理器使用 **`Schema`** 和 **`Layout`** 类来管理记录的信息。它们的 API 如 图 6.10 所示。
+
+**图 6.10 SimpleDB 记录信息的 API**
+
+**`Schema` 类 (Schema Class)**
+
+- `public Schema()`: 构造函数，创建一个新的 `Schema` 对象。
+- `public void addField(String fldname, int type, int length)`: 添加一个字段，指定字段名、类型和长度。
+- `public void addIntField(String fldname)`: 便捷方法，添加一个整数字段。
+- `public void addStringField(String fldname, int length)`: 便捷方法，添加一个字符串字段，指定最大长度。
+- `public void add(String fldname, Schema sch)`: 从另一个 `Schema` 对象复制指定字段的信息。
+- `public void addAll(Schema sch)`: 从另一个 `Schema` 对象复制所有字段的信息。
+- `public List<String> fields()`: 获取所有字段名称的列表。
+- `public boolean hasField(String fldname)`: 检查模式中是否存在指定字段。
+- `public int type(String fldname)`: 获取指定字段的类型。
+- `public int length(String fldname)`: 获取指定字段的长度（对字符串而言是最大字符数）。
+
+**`Layout` 类 (Layout Class)**
+
+- `public Layout(Schema schema)`: 构造函数，根据给定的 `Schema` 计算并创建物理布局。
+- `public Layout(Schema schema, Map<String,Integer> offsets, int slotSize)`: 构造函数，使用已计算的偏移量和槽大小创建布局（用于加载现有表）。
+- `public Schema schema()`: 获取关联的 `Schema` 对象。
+- `public int offset(String fldname)`: 获取指定字段在槽内的字节偏移量。
+- `public int slotSize()`: 获取每个记录槽的总字节大小。
+
+一个 **`Schema` 对象** 保存着记录的**模式 (schema)**，即每个字段的名称、类型以及每个字符串字段的长度。这些信息对应于用户在创建表时会指定的内容，并且**不包含任何物理存储信息**。例如，字符串的长度是指允许的最大字符数，而不是其在字节中的实际大小。
+
+`Schema` 可以被认为是 `[字段名, 类型, 长度]` 形式的三元组列表。`Schema` 类包含五个方法来向此列表添加三元组。`addField` 方法显式地添加一个三元组。`addIntField`、`addStringField`、`add` 和 `addAll` 都是便捷方法；前两个方法计算三元组，后两个方法从现有模式中复制三元组。该类还具有**访问器方法 (accessor methods)**，用于检索字段名集合，确定指定字段是否在集合中，以及检索指定字段的类型和长度。
+
+**`Layout` 类** 则额外包含了记录的**物理信息 (physical information)**。它计算字段和槽的大小，以及字段在槽内的偏移量。该类有两个构造函数，对应于创建 `Layout` 对象的两种原因。第一个构造函数在创建表时调用；它根据给定的模式计算布局信息。第二个构造函数在表创建后调用；客户端只需提供先前计算好的值。
+
+图 6.11 中的代码片段演示了这两个类的用法。代码的第一部分创建了一个包含 `COURSE` 表三个字段的模式，然后从该模式创建了一个 `Layout` 对象。代码的第二部分打印了每个字段的名称和偏移量。
+
+**图 6.11 指定 `COURSE` 记录的结构 (Specifying the structure of COURSE records)**
+
+```java
+Schema sch = new Schema(); // 创建一个新的 Schema 对象
+sch.addIntField("cid"); // 添加一个名为 "cid" 的整数字段
+sch.addStringField("title", 20); // 添加一个名为 "title" 的字符串字段，最大长度为 20
+sch.addIntField("deptid"); // 添加一个名为 "deptid" 的整数字段
+
+Layout layout = new Layout(sch); // 根据 Schema 创建 Layout 对象，计算物理布局
+
+// 遍历布局中的所有字段，并打印它们的名称和偏移量
+for (String fldname : layout.schema().fields()) {
+    int offset = layout.offset(fldname); // 获取字段的字节偏移量
+    System.out.println(fldname + " has offset " + offset); // 打印结果
+}
+```
+
+------
+
+### 6.3.2 实现 `Schema` 和 `Layout` (Implementing the Schema and Layout)
+
+**`Schema` 类** 的代码非常直接，如 图 6.12 所示。在内部，该类将三元组存储在以字段名作为键的 `Map` 中。与字段名关联的对象属于私有内部类 `FieldInfo`，它封装了字段的长度和类型。
+
+------
+
+**图 6.12 SimpleDB `Schema` 类的代码 (The code for SimpleDB class Schema)**
+
+```java
+public class Schema {
+    private List<String> fields = new ArrayList<>(); // 存储字段名的列表，保持顺序
+    private Map<String,FieldInfo> info = new HashMap<>(); // 存储字段信息（FieldInfo对象），键为字段名
+
+    // 显式添加字段的方法
+    public void addField(String fldname, int type, int length) {
+        fields.add(fldname); // 将字段名添加到列表中
+        info.put(fldname, new FieldInfo(type, length)); // 将字段信息存储到Map中
+    }
+
+    // 添加整数字段的便捷方法 (类型为 INTEGER，长度为 0，因为整数长度固定)
+    public void addIntField(String fldname) {
+        addField(fldname, INTEGER, 0);
+    }
+
+    // 添加字符串字段的便捷方法 (类型为 VARCHAR，指定长度)
+    public void addStringField(String fldname, int length) {
+        addField(fldname, VARCHAR, length);
+    }
+
+    // 从另一个 Schema 复制指定字段
+    public void add(String fldname, Schema sch) {
+        int type = sch.type(fldname);
+        int length = sch.length(fldname);
+        addField(fldname, type, length);
+    }
+
+    // 从另一个 Schema 复制所有字段
+    public void addAll(Schema sch) {
+        for (String fldname : sch.fields())
+            add(fldname, sch);
+    }
+
+    // 获取所有字段名
+    public List<String> fields() {
+        return fields;
+    }
+
+    // 检查是否包含某个字段
+    public boolean hasField(String fldname) {
+        return fields.contains(fldname);
+    }
+
+    // 获取指定字段的类型
+    public int type(String fldname) {
+        return info.get(fldname).type;
+    }
+
+    // 获取指定字段的长度
+    public int length(String fldname) {
+        return info.get(fldname).length;
+    }
+
+    // 私有内部类，封装字段的类型和长度
+    class FieldInfo {
+        int type, length;
+        public FieldInfo(int type, int length) {
+            this.type = type;
+            this.length = length;
+        }
+    }
+}
+```
+
+类型由 JDBC 类 `Types` 中定义的常量 `INTEGER` 和 `VARCHAR` 表示。字段的长度仅对字符串字段有意义；`addIntField` 方法为整数赋予长度值 0，但此值不相关，因为它永远不会被访问。
+
+**`Layout` 类** 的代码如 图 6.13 所示。第一个构造函数按照它们在 `Schema` 中出现的顺序定位字段。它以字节为单位确定每个字段的长度，将**槽大小 (slot size)** 计算为字段长度的总和，并为整数大小的空/使用中标志额外添加四个字节。它将标志分配在槽的偏移量 0 处，并将每个字段的偏移量分配为前一个字段结束的位置（即**没有填充 (no padding)**）。
+
+**图 6.13 SimpleDB `Layout` 类的代码 (The code for the SimpleDB class Layout)**
+
+```java
+public class Layout {
+    private Schema schema; // 关联的 Schema 对象
+    private Map<String,Integer> offsets; // 存储字段名到其在槽中偏移量的映射
+    private int slotsize; // 每个记录槽的总大小（字节）
+
+    // 构造函数：根据 Schema 计算布局
+    public Layout(Schema schema) {
+        this.schema = schema;
+        offsets = new HashMap<>();
+        // 从 Integer.BYTES (4字节) 处开始计算字段偏移量，因为前 4 字节用于空/使用中标志
+        int pos = Integer.BYTES; 
+        for (String fldname : schema.fields()) {
+            offsets.put(fldname, pos); // 记录当前字段的偏移量
+            pos += lengthInBytes(fldname); // 增加位置，为下一个字段做准备
+        }
+        slotsize = pos; // 槽大小等于所有字段长度加上标志位的总和
+    }
+
+    // 构造函数：使用预先计算好的偏移量和槽大小（用于加载现有表）
+    public Layout(Schema schema, Map<String,Integer> offsets, int slotsize) {
+        this.schema = schema;
+        this.offsets = offsets;
+        this.slotsize = slotsize;
+    }
+
+    // 获取关联的 Schema
+    public Schema schema() {
+        return schema;
+    }
+
+    // 获取指定字段的偏移量
+    public int offset(String fldname) {
+        return offsets.get(fldname);
+    }
+
+    // 获取槽的大小
+    public int slotSize() {
+        return slotsize;
+    }
+
+    // 私有辅助方法：计算字段在字节中的实际长度
+    private int lengthInBytes(String fldname) {
+        int fldtype = schema.type(fldname);
+        if (fldtype == INTEGER)
+            return Integer.BYTES; // 整数字段固定为 Integer.BYTES 字节 (通常是 4)
+        else // fldtype == VARCHAR
+            // 字符串字段的长度由 Page.maxLength 计算，基于其最大字符数
+            return Page.maxLength(schema.length(fldname));
+    }
+}
+```
+
+### 6.3.3 管理页面中的记录 (Managing the Records in a Page)
+
+**`RecordPage` 类** 管理页面中的记录。它的 API 如 图 6.14 所示。
+
+**图 6.14 SimpleDB 记录页的 API (The API for SimpleDB record pages)**
+
+**`RecordPage` 类 (RecordPage Class)**
+
+- `public RecordPage(Transaction tx, BlockId blk, Layout layout)`: 构造函数，用于管理特定块 (`blk`) 上具有给定 `layout` 的记录，所有操作都在一个事务 (`tx`) 内完成。
+- `public BlockId block()`: 返回该页面所属块的 `BlockId`。
+- `public int getInt(int slot, String fldname)`: 从指定槽位、指定字段获取一个整数值。
+- `public String getString(int slot, String fldname)`: 从指定槽位、指定字段获取一个字符串值。
+- `public void setInt(int slot, String fldname, int val)`: 在指定槽位、指定字段设置一个整数值。
+- `public void setString(int slot, String fldname, String val)`: 在指定槽位、指定字段设置一个字符串值。
+- `public void format()`: 格式化页面，将所有记录槽设置为默认值（标志为空，整数为 0，字符串为空）。
+- `public void delete(int slot)`: 删除指定槽位的记录（将其标志设为空）。
+- `public int nextAfter(int slot)`: 在指定槽位之后查找下一个已使用的槽位。如果找不到，返回负值。
+- `public int insertAfter(int slot)`: 在指定槽位之后查找下一个空槽位。如果找到，将其标志设为“已使用”并返回槽号；否则返回负值。
+
+`get/set` 方法访问指定记录中指定字段的值。`delete` 方法将记录的标志设置为 `EMPTY`。`format` 方法为页面中所有记录槽提供默认值。它将每个空/使用中标志设置为 `EMPTY`，所有整数设置为 0，所有字符串设置为 `""`。
+
+**`RecordTest` 类** 演示了 `RecordPage` 方法的使用；其代码如 图 6.15 所示。它定义了一个包含两个字段的记录模式：一个整数字段 A 和一个字符串字段 B。然后它为新块创建一个 `RecordPage` 对象并对其进行格式化。`for` 循环使用 `insertAfter` 方法用随机值记录填充页面。（每个 A 值是 0 到 49 之间的随机数，B 值是该数字的字符串版本。）两个 `while` 循环使用 `nextAfter` 方法搜索页面。第一个循环删除选定的记录，第二个循环打印剩余记录的内容。
+
+**图 6.15 测试 `RecordPage` 类 (Testing the RecordPage class)**
+
+```java
+public class RecordTest {
+    public static void main(String[] args) throws Exception {
+        // 初始化SimpleDB，指定数据库名称、块大小和缓冲区数量
+        SimpleDB db = new SimpleDB("recordtest", 400, 8); 
+        Transaction tx = db.newTx(); // 开始一个新的事务
+
+        // 定义记录的模式 (Schema)
+        Schema sch = new Schema();
+        sch.addIntField("A"); // 添加一个名为"A"的整数字段
+        sch.addStringField("B", 9); // 添加一个名为"B"的字符串字段，最大长度为9字符
+        Layout layout = new Layout(sch); // 根据Schema创建布局
+
+        // 打印字段名称和它们的偏移量
+        for (String fldname : layout.schema().fields()) {
+            int offset = layout.offset(fldname);
+            System.out.println(fldname + " has offset " + offset);
+        }
+
+        // 将一个新块附加到"testfile"并将其钉住（pin）在缓冲区中
+        BlockId blk = tx.append("testfile");
+        tx.pin(blk);
+
+        // 创建一个RecordPage对象来管理这个块中的记录
+        RecordPage rp = new RecordPage(tx, blk, layout);
+        rp.format(); // 格式化页面，将所有槽位标记为"空"并初始化字段
+
+        System.out.println("Filling the page with random records.");
+        // 从-1（表示从开头）开始插入记录，直到页面满
+        int slot = rp.insertAfter(-1); 
+        while (slot >= 0) {
+            int n = (int) Math.round(Math.random() * 50); // 生成0到50之间的随机整数
+            rp.setInt(slot, "A", n); // 设置字段"A"的值
+            rp.setString(slot, "B", "rec"+n); // 设置字段"B"的值（字符串形式）
+            System.out.println("inserting into slot " + slot + ": {"+ n + ", " + "rec"+n + "}");
+            slot = rp.insertAfter(slot); // 获取下一个可用的槽位
+        }
+
+        System.out.println("Deleted these records with A-values < 25.");
+        int count = 0;
+        // 从-1（表示从开头）开始查找已使用的槽位
+        slot = rp.nextAfter(-1);
+        while (slot >= 0) {
+            int a = rp.getInt(slot, "A"); // 获取字段"A"的值
+            String b = rp.getString(slot, "B"); // 获取字段"B"的值
+            if (a < 25) { // 如果A的值小于25
+                count++;
+                System.out.println("slot " + slot + ": {"+ a + ", " + b + "}");
+                rp.delete(slot); // 删除该记录
+            }
+            slot = rp.nextAfter(slot); // 获取下一个已使用的槽位
+        }
+        System.out.println(count + " values under 25 were deleted.\n");
+
+        System.out.println("Here are the remaining records.");
+        // 再次从-1（表示从开头）开始查找已使用的槽位，打印剩余记录
+        slot = rp.nextAfter(-1);
+        while (slot >= 0) {
+            int a = rp.getInt(slot, "A");
+            String b = rp.getString(slot, "B");
+            System.out.println("slot " + slot + ": {"+ a + ", " + b + "}");
+            slot = rp.nextAfter(slot);
+        }
+        
+        tx.unpin(blk); // 解除块的钉住
+        tx.commit(); // 提交事务
+    }
+}
+```
+
+### 6.3.4 实现记录页 (Implementing Record Pages)
+
+SimpleDB 实现了 图 6.5 中所示的**槽页结构 (slotted-page structure)**。唯一的区别是空/使用中标志被实现为 4 字节整数而不是单个字节（原因是 SimpleDB 不支持字节大小的值）。`RecordPage` 类的代码如 图 6.16 所示。
+
+**图 6.16 SimpleDB `RecordPage` 类的代码 (The code for the SimpleDB class RecordPage)**
+
+```java
+public class RecordPage {
+    public static final int EMPTY = 0, USED = 1; // 定义槽状态常量：空和已使用
+    private Transaction tx; // 事务对象
+    private BlockId blk; // 块ID
+    private Layout layout; // 记录布局
+
+    // 构造函数：初始化RecordPage对象，并钉住（pin）其关联的块
+    public RecordPage(Transaction tx, BlockId blk, Layout layout) {
+        this.tx = tx;
+        this.blk = blk;
+        this.layout = layout;
+        tx.pin(blk); 
+    }
+
+    // 获取指定槽位、指定字段的整数值
+    public int getInt(int slot, String fldname) {
+        int fldpos = offset(slot) + layout.offset(fldname); // 计算字段的绝对字节位置
+        return tx.getInt(blk, fldpos); // 从块中读取整数
+    }
+
+    // 获取指定槽位、指定字段的字符串值
+    public String getString(int slot, String fldname) {
+        int fldpos = offset(slot) + layout.offset(fldname); // 计算字段的绝对字节位置
+        return tx.getString(blk, fldpos); // 从块中读取字符串
+    }
+
+    // 设置指定槽位、指定字段的整数值
+    public void setInt(int slot, String fldname, int val) {
+        int fldpos = offset(slot) + layout.offset(fldname); // 计算字段的绝对字节位置
+        tx.setInt(blk, fldpos, val, true); // 向块中写入整数，并记录日志
+    }
+
+    // 设置指定槽位、指定字段的字符串值
+    public void setString(int slot, String fldname, String val) {
+        int fldpos = offset(slot) + layout.offset(fldname); // 计算字段的绝对字节位置
+        tx.setString(blk, fldpos, val, true); // 向块中写入字符串，并记录日志
+    }
+
+    // 删除指定槽位的记录（通过设置其标志为空）
+    public void delete(int slot) {
+        setFlag(slot, EMPTY);
+    }
+
+    // 格式化页面：将所有槽位标记为“空”，并初始化字段为默认值
+    public void format() {
+        int slot = 0;
+        while (isValidSlot(slot)) { // 遍历所有可能的槽位
+            tx.setInt(blk, offset(slot), EMPTY, false); // 设置标志为空，不记录日志（格式化是初始操作）
+            Schema sch = layout.schema();
+            for (String fldname : sch.fields()) {
+                int fldpos = offset(slot) + layout.offset(fldname);
+                if (sch.type(fldname) == INTEGER)
+                    tx.setInt(blk, fldpos, 0, false); // 初始化整数为0，不记录日志
+                else
+                    tx.setString(blk, fldpos, "", false); // 初始化字符串为空串，不记录日志
+            }
+            slot++;
+        }
+    }
+
+    // 在指定槽位之后查找下一个已使用的槽位
+    public int nextAfter(int slot) {
+        return searchAfter(slot, USED);
+    }
+
+    // 在指定槽位之后查找下一个空槽位，如果找到则标记为已使用
+    public int insertAfter(int slot) {
+        int newslot = searchAfter(slot, EMPTY);
+        if (newslot >= 0) // 如果找到了空槽位
+            setFlag(newslot, USED); // 将其标志设置为“已使用”
+        return newslot;
+    }
+
+    // 获取此RecordPage关联的块ID
+    public BlockId block() {
+        return blk;
+    }
+
+    // 私有辅助方法
+    // 设置指定槽位的标志
+    private void setFlag(int slot, int flag) {
+        tx.setInt(blk, offset(slot), flag, true); // 设置标志并记录日志
+    }
+
+    // 在指定槽位之后搜索具有特定标志（USED或EMPTY）的槽位
+    private int searchAfter(int slot, int flag) {
+        slot++; // 从下一个槽位开始搜索
+        while (isValidSlot(slot)) { // 只要槽位有效
+            if (tx.getInt(blk, offset(slot)) == flag) // 检查槽位的标志是否匹配
+                return slot; // 找到匹配的槽位，返回其槽号
+            slot++; // 否则，移动到下一个槽位
+        }
+        return -1; // 没有找到匹配的槽位
+    }
+
+    // 检查指定槽位是否有效（即是否在块的范围内）
+    private boolean isValidSlot(int slot) {
+        // 槽位有效条件：该槽位紧邻的下一个槽位的起始位置不超出块大小
+        return offset(slot+1) <= tx.blockSize(); 
+    }
+
+    // 计算指定槽位的起始字节偏移量
+    private int offset(int slot) {
+        return slot * layout.slotSize(); // 槽号乘以槽大小
+    }
+}
+```
+
+私有方法 `offset` 使用槽大小来计算记录槽的起始位置。`get/set` 方法通过将字段的偏移量（从 `Layout` 获取）添加到记录的偏移量来计算其指定字段的位置。`nextAfter` 和 `insertAfter` 方法分别调用私有方法 `searchAfter` 来查找具有指定标志（`USED` 或 `EMPTY`）的槽。`searchAfter` 方法会重复递增指定的槽号，直到找到具有指定标志的槽或用完槽。`delete` 方法将指定槽的标志设置为 `EMPTY`，而 `insertAfter` 将找到的槽的标志设置为 `USED`。
