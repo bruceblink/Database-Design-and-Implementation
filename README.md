@@ -105,7 +105,7 @@ database-design-and-implementation/
    - 6.6 建议阅读（Suggested Reading）
    - 6.7 习题（Exercises）
 
-7. ###   元数据管理（Metadata Management）
+7. ###   [元数据管理（Metadata Management）](content/chapters/chapter7.md#第-7-章-元数据管理metadata-management)
 
    - 7.1 元数据管理器（The Metadata Manager）
    - 7.2 表元数据（Table Metadata）
