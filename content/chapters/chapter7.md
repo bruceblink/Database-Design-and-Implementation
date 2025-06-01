@@ -272,3 +272,83 @@ public class TableMgr {
 ```
 
 **图 7.6 `TableMgr` 类的代码 (The code for TableMgr)**
+
+## 7.3 视图元数据 (View Metadata)
+
+**视图 (View)** 是一种表，其记录是根据查询动态计算的。该查询被称为视图的**定义 (definition)**，并在创建视图时指定。元数据管理器存储每个新创建视图的定义，并在请求时检索其定义。
+
+SimpleDB 的 **`ViewMgr` 类** 负责此职责。该类将视图定义存储在**目录表 `viewcat`** 中，每个视图对应一条记录。该表具有以下字段：
+
+```txt
+viewcat(ViewName, ViewDef)
+```
+
+**图 7.7 SimpleDB `ViewMgr` 类的代码 (The code for the SimpleDB class ViewMgr)**
+
+```java
+class ViewMgr {
+    // 视图定义的最大字符数
+    private static final int MAX_VIEWDEF = 100; 
+    // 对 TableMgr 的引用，用于访问表元数据
+    TableMgr tblMgr; 
+
+    // 构造函数
+    // isNew: 标记数据库是否是新创建的
+    // tblMgr: TableMgr 实例
+    // tx: 当前的事务
+    public ViewMgr(boolean isNew, TableMgr tblMgr, Transaction tx) {
+        this.tblMgr = tblMgr;
+        // 如果数据库是新创建的，则创建 viewcat 表
+        if (isNew) {
+            Schema sch = new Schema();
+            sch.addStringField("viewname", TableMgr.MAX_NAME); // 视图名（字符串类型，最大长度由 TableMgr.MAX_NAME 定义）
+            sch.addStringField("viewdef", MAX_VIEWDEF);        // 视图定义（字符串类型，最大长度 MAX_VIEWDEF）
+            tblMgr.createTable("viewcat", sch, tx);             // 使用 TableMgr 创建 viewcat 表
+        }
+    }
+
+    // 创建视图的方法
+    // vname: 视图名称
+    // vdef: 视图的定义（SQL 查询字符串）
+    // tx: 当前事务
+    public void createView(String vname, String vdef, Transaction tx) {
+        // 获取 viewcat 表的布局
+        Layout layout = tblMgr.getLayout("viewcat", tx);
+        // 打开 viewcat 表的扫描器
+        TableScan ts = new TableScan(tx, "viewcat", layout);
+        // 插入一条新记录
+        ts.insert(); 
+        // 设置视图名
+        ts.setString("viewname", vname);
+        // 设置视图定义
+        ts.setString("viewdef", vdef);
+        // 关闭扫描器
+        ts.close();
+    }
+
+    // 获取视图定义的方法
+    // vname: 要获取定义的视图名称
+    // tx: 当前事务
+    public String getViewDef(String vname, Transaction tx) {
+        String result = null; // 用于存储查询结果的视图定义
+        // 获取 viewcat 表的布局
+        Layout layout = tblMgr.getLayout("viewcat", tx);
+        // 打开 viewcat 表的扫描器
+        TableScan ts = new TableScan(tx, "viewcat", layout);
+        // 遍历 viewcat 表的记录
+        while (ts.next()) {
+            // 如果找到匹配的视图名
+            if (ts.getString("viewname").equals(vname)) {
+                result = ts.getString("viewdef"); // 获取视图定义
+                break; // 找到后退出循环
+            }
+        }
+        ts.close(); // 关闭扫描器
+        return result; // 返回视图定义
+    }
+}
+```
+
+`ViewMgr` 的代码如 图 7.7 所示。它的构造函数在系统启动期间被调用，如果数据库是新的，则创建 `viewcat` 表。`createView` 和 `getViewDef` 方法都使用**表扫描 (table scan)** 来访问目录表——`createView` 在表中插入一条记录，而 `getViewDef` 遍历表以查找与指定视图名称对应的记录。
+
+视图定义存储为 `varchar` 字符串，这意味着视图定义的长度受到相对较小的限制。当前 100 个字符的限制显然是完全不现实的，因为视图定义可能长达数千个字符。一个更好的选择是将 `ViewDef` 字段实现为 `clob` 类型，例如 `clob(9999)`。
