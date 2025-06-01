@@ -352,3 +352,200 @@ class ViewMgr {
 `ViewMgr` 的代码如 图 7.7 所示。它的构造函数在系统启动期间被调用，如果数据库是新的，则创建 `viewcat` 表。`createView` 和 `getViewDef` 方法都使用**表扫描 (table scan)** 来访问目录表——`createView` 在表中插入一条记录，而 `getViewDef` 遍历表以查找与指定视图名称对应的记录。
 
 视图定义存储为 `varchar` 字符串，这意味着视图定义的长度受到相对较小的限制。当前 100 个字符的限制显然是完全不现实的，因为视图定义可能长达数千个字符。一个更好的选择是将 `ViewDef` 字段实现为 `clob` 类型，例如 `clob(9999)`。
+
+## 7.4 统计元数据 (Statistical Metadata)
+
+数据库系统管理的另一种元数据是关于数据库中每个表的**统计信息 (statistical information)**，例如它有多少条记录以及其字段值的分布。这些统计数据被查询规划器用于估算查询成本。经验表明，一套好的统计数据可以显著提高查询的执行时间。因此，商业元数据管理器倾向于维护详细、全面的统计数据，例如每个表中每个字段的值和范围直方图，以及不同表中字段之间的相关信息。
+
+为简单起见，本节仅考虑以下三种统计信息：
+
+- 每个表 T 使用的块数，记为 B(T)
+- 每个表 T 中的记录数，记为 R(T)
+- 对于表 T 的每个字段 F， T 中 F 值的**不同值的数量**，记为 V(T,F)
+
+图 7.8 给出了一些大学数据库的示例统计数据。这些值对应于一所每年招收约 900 名学生，每年提供约 500 个课程班次的大学；该大学已保留此信息 50 年。图 7.8 中的值力求真实，不一定与从图 1.1 中计算出的值相符。相反，这些数字假设每个块能容纳 10 条 `STUDENT` 记录，每个块能容纳 20 条 `DEPT` 记录，依此类推。
+
+查看 `STUDENT` 表的 V(T,F) 值。`SId` 是 `STUDENT` 的键意味着 V(STUDENT,SId)=45,000。赋值 V(STUDENT,SName)=44,960 意味着 45,000 名学生中有 40 名学生的名字重复。赋值 V(STUDENT,GradYear)=50 意味着过去 50 年中每年至少有一名学生毕业。赋值 V(STUDENT,MajorId)=40 意味着 40 个系中的每个系在某个时候至少有一个专业。
+
+**图 7.8 大学数据库的示例统计数据 (Example statistics about the university database)**
+
+| **T**   | **B(T)** | **R(T)**  | **V(T,F)**             |
+| ------- | -------- | --------- | ---------------------- |
+| STUDENT | 4,500    | 45,000    | 45,000 for F=SId       |
+|         |          |           | 44,960 for F=SName     |
+|         |          |           | 50 for F=GradYear      |
+|         |          |           | 40 for F=MajorId       |
+| DEPT    | 2        | 40        | 40 for F=DId, DName    |
+| COURSE  | 25       | 500       | 500 for F=CId, Title   |
+|         |          |           | 40 for F=DeptId        |
+| SECTION | 2,500    | 25,000    | 25,000 for F=SectId    |
+|         |          |           | 500 for F=CourseId     |
+|         |          |           | 250 for F=Prof         |
+|         |          |           | 50 for F=YearOffered   |
+| ENROLL  | 50,000   | 1,500,000 | 1,500,000 for F=EId    |
+|         |          |           | 25,000 for F=SectionId |
+|         |          |           | 45,000 for F=StudentId |
+|         |          |           | 14 for F=Grade         |
+
+**图 7.9 SimpleDB 表统计信息的 API (The API for SimpleDB table statistics)**
+
+**`StatMgr` 类 (StatMgr Class)**
+
+- `public StatMgr(TableMgr tm, Transaction tx)`: 构造函数，创建一个 `StatMgr` 对象。
+- `public StatInfo getStatInfo(String tblname, Layout lo, Transaction tx)`: 获取指定表的统计信息，返回一个 `StatInfo` 对象。
+
+**`StatInfo` 类 (StatInfo Class)**
+
+- `public int blocksAccessed()`: 返回表使用的块数（即 B(T)）。
+- `public int recordsOutput()`: 返回表中的记录数（即 R(T)）。
+- `public int distinctValues(String fldname)`: 返回指定字段的不同值的数量（即 V(T,F)）。
+
+SimpleDB 的 **`StatMgr` 类** 管理这些统计信息。数据库引擎持有一个 `StatMgr` 对象。该对象有一个 `getStatInfo` 方法，它为指定表返回一个 `StatInfo` 对象。`StatInfo` 对象保存该表的统计数据，并具有 `blocksAccessed`、`recordsOutput` 和 `distinctValues` 方法，它们分别实现了统计函数 B(T)、R(T) 和 V(T,F)。这些类的 API 如 图 7.9 所示。
+
+**图 7.10 获取和打印表统计信息 (Obtaining and printing statistics about a table)**
+
+```java
+// 假设 SimpleDB db = ...; TableMgr tblmgr = ...; 已初始化
+
+SimpleDB db = /* ... */; // 假设 SimpleDB 实例已创建
+Transaction tx = db.newTx(); // 开启一个新事务
+
+TableMgr tblmgr = /* ... */; // 假设 TableMgr 实例已创建
+
+StatMgr statmgr = new StatMgr(tblmgr, tx); // 创建 StatMgr 实例
+Layout layout = tblmgr.getLayout("student", tx); // 获取 "student" 表的布局
+
+StatInfo si = statmgr.getStatInfo("student", layout, tx); // 获取 "student" 表的统计信息
+
+System.out.println(si.blocksAccessed() + " " + // 打印 B(STUDENT)
+                   si.recordsOutput() + " " +   // 打印 R(STUDENT)
+                   si.distinctValues("majorid")); // 打印 V(STUDENT, MajorId)
+
+tx.commit(); // 提交事务
+```
+
+图 7.10 中的代码片段展示了这些方法的典型用法。此代码获取 `STUDENT` 表的统计信息，并打印 B(STUDENT)、R(STUDENT) 和 V(STUDENT,MajorId) 的值。
+
+数据库引擎可以通过两种方式管理统计元数据。一种是将信息存储在数据库目录中，并在数据库更改时更新它。另一种是将信息存储在内存中，在引擎初始化时计算它。
+
+第一种方法对应于创建两个新的目录表，称为 tblstats 和 fldstats，它们具有以下字段：
+
+tblstats(TblName, NumBlocks, NumRecords)
+
+fldstats(TblName, FldName, NumValues)
+
+`tblstats` 表将为每个表 T 包含一条记录，其中包含 B(T) 和 R(T) 的值。`fldstats` 表将为每个表 T 的每个字段 F 包含一条记录，其中包含 V(T,F) 的值。这种方法的问题在于保持统计数据最新所需的成本。每次调用 `insert`、`delete`、`setInt` 和 `setString` 都可能需要更新这些表。还需要额外的磁盘访问来将修改后的页面写入磁盘。此外，并发性会降低——每次更新表 T 都会对包含 T 统计记录的块进行排他锁 (xlock)，这将迫使需要读取 T 统计数据的事务（以及在同一页面上有记录的其他表的统计数据）等待。
+
+解决这个问题的一个可行方案是允许事务在不获取共享锁 (slocks) 的情况下读取统计数据，就像第 5.4.7 节中读未提交 (read-uncommitted) 隔离级别一样。准确性损失是可以容忍的，因为数据库系统使用这些统计数据来比较查询计划的估计执行时间。因此，统计数据不需要非常精确，只要它们产生的估计是合理的即可。
+
+第二种实现策略是抛弃目录表，直接将统计数据存储在内存中。统计数据相对较小，应该很容易适应主内存。唯一的问题是每次服务器启动时都需要从头开始计算统计数据。这种计算需要扫描数据库中的每个表，以计数记录、块和已见值的数量。
+
+如果数据库不是太大，这种计算不会过多地延迟系统启动。
+
+这种主内存策略有两种处理数据库更新的选项。第一个选项是像以前一样，每次数据库更新都更新统计数据。第二个选项是让统计数据不更新，但每隔一段时间从头开始重新计算它们。这第二个选项再次依赖于不需要精确统计信息的事实，因此在刷新它们之前让统计数据稍微过时是可以容忍的。
+
+SimpleDB 采用了第二种方法的第二个选项。`StatMgr` 类维护一个名为 `tableStats` 的变量，其中包含每个表的成本信息。该类有一个公共方法 `statInfo`，它返回指定表的成本值，以及私有方法 `refreshStatistics` 和 `refreshTableStats` 来重新计算成本值。该类的代码如 图 7.11 所示。
+
+`StatMgr` 类维护一个计数器，每次调用 `statInfo` 时都会递增。如果计数器达到特定值（此处为 100），则调用 `refreshStatistics` 以重新计算所有表的成本值。如果对没有已知值的表调用 `statInfo`，则调用 `refreshTableStats` 来计算该表的统计数据。
+
+`refreshStatistics` 的代码遍历 `tblcat` 表。循环体提取表名并调用 `refreshTableStats` 来计算该表的统计数据。`refreshTableStats` 方法遍历该表的内容，计数记录，并调用 `size` 来确定使用的块数。为简单起见，该方法不计数字段值。相反，`StatInfo` 对象根据其表中的记录数，对字段的不同值的数量进行大胆猜测。
+
+**图 7.11 SimpleDB `StatMgr` 类的代码 (The code for the SimpleDB class StatMgr)**
+
+```java
+class StatMgr {
+    private TableMgr tblMgr;             // TableMgr 的引用，用于获取表布局
+    private Map<String, StatInfo> tablestats; // 存储每个表的统计信息（表名 -> StatInfo 对象）
+    private int numcalls;                // 计数器，记录 getStatInfo 被调用的次数
+
+    // 构造函数
+    // tblMgr: TableMgr 实例
+    // tx: 当前事务
+    public StatMgr(TableMgr tblMgr, Transaction tx) {
+        this.tblMgr = tblMgr;
+        refreshStatistics(tx); // 构造时立即刷新所有表的统计信息
+    }
+
+    // 获取表的统计信息
+    // tblname: 表名
+    // layout: 表的布局
+    // tx: 当前事务
+    public synchronized StatInfo getStatInfo(String tblname, Layout layout, Transaction tx) {
+        numcalls++; // 每次调用增加计数器
+        if (numcalls > 100) { // 如果调用次数超过 100，则刷新所有统计信息
+            refreshStatistics(tx);
+        }
+        StatInfo si = tablestats.get(tblname); // 尝试从缓存中获取统计信息
+        if (si == null) { // 如果缓存中没有该表的统计信息
+            si = calcTableStats(tblname, layout, tx); // 计算该表的统计信息
+            tablestats.put(tblname, si); // 存储到缓存中
+        }
+        return si; // 返回统计信息
+    }
+
+    // 刷新所有表的统计信息
+    private synchronized void refreshStatistics(Transaction tx) {
+        tablestats = new HashMap<String, StatInfo>(); // 清空旧的统计信息缓存
+        numcalls = 0; // 重置计数器
+        Layout tcatlayout = tblMgr.getLayout("tblcat", tx); // 获取 tblcat 表的布局
+        TableScan tcat = new TableScan(tx, "tblcat", tcatlayout); // 打开 tblcat 表的扫描器
+
+        while (tcat.next()) { // 遍历 tblcat 表的记录
+            String tblname = tcat.getString("tblname"); // 获取表名
+            Layout layout = tblMgr.getLayout(tblname, tx); // 获取该表的布局
+            StatInfo si = calcTableStats(tblname, layout, tx); // 计算该表的统计信息
+            tablestats.put(tblname, si); // 存储到缓存中
+        }
+        tcat.close(); // 关闭扫描器
+    }
+
+    // 计算单个表的统计信息
+    // tblname: 表名
+    // layout: 表的布局
+    // tx: 当前事务
+    private synchronized StatInfo calcTableStats(String tblname, Layout layout, Transaction tx) {
+        int numRecs = 0;   // 记录数
+        int numblocks = 0; // 块数
+        TableScan ts = new TableScan(tx, tblname, layout); // 打开表的扫描器
+        while (ts.next()) { // 遍历表的记录
+            numRecs++; // 记录数加一
+            numblocks = ts.getRid().blockNumber() + 1; // 更新块数（取当前记录所在块号加一，因为块号从0开始）
+        }
+        ts.close(); // 关闭扫描器
+        return new StatInfo(numblocks, numRecs); // 返回 StatInfo 对象
+    }
+}
+```
+
+`StatInfo` 类的代码如 图 7.12 所示。请注意，`distinctValues` 方法没有使用传入的字段值，因为它天真地假设任何字段的大约 1/3 的值是不同的。不用说，这个假设非常糟糕。练习 7.12 要求您纠正这种情况。
+
+**图 7.12 SimpleDB `StatInfo` 类的代码 (The code for the SimpleDB class StatInfo)**
+
+```java
+public class StatInfo {
+    private int numBlocks; // 块数
+    private int numRecs;   // 记录数
+
+    // 构造函数
+    public StatInfo(int numblocks, int numrecs) {
+        this.numBlocks = numblocks;
+        this.numRecs = numrecs;
+    }
+
+    // 返回块数 (B(T))
+    public int blocksAccessed() {
+        return numBlocks;
+    }
+
+    // 返回记录数 (R(T))
+    public int recordsOutput() {
+        return numRecs;
+    }
+
+    // 返回字段的不同值的数量 (V(T,F))
+    // 注意：这里的实现非常不准确，它没有实际计算不同值，而是基于记录数进行粗略猜测
+    public int distinctValues(String fldname) {
+        return 1 + (numRecs / 3); // 这非常不准确。
+    }
+}
+```
