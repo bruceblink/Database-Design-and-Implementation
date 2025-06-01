@@ -549,3 +549,191 @@ public class StatInfo {
     }
 }
 ```
+
+## 7.5 索引元数据 (Index Metadata)
+
+索引的元数据包括其名称、它索引的表名称以及其索引字段的列表。索引管理器是存储和检索此元数据的系统组件。SimpleDB 索引管理器由两个类组成：`IndexMgr` 和 `IndexInfo`。它们的 API 如 图 7.13 所示。
+
+**图 7.13 SimpleDB 索引元数据的 API (The API for SimpleDB index metadata)**
+
+**`IndexMgr` 类 (IndexMgr Class)**
+
+- `public IndexMgr(boolean isnew, TableMgr tmgr, StatMgr smgr, Transaction tx)`: 构造函数，创建一个 `IndexMgr` 对象。
+- `public createIndex(String iname, String tname, String fname, Transaction tx)`: 创建一个索引。`iname` 是索引名，`tname` 是被索引的表名，`fname` 是被索引的字段名。
+- `public Map<String, IndexInfo> getIndexInfo(String tblname, Transaction tx)`: 获取指定表上所有索引的元数据，返回一个以索引字段为键的 `IndexInfo` 对象映射。
+
+**`IndexInfo` 类 (IndexInfo Class)**
+
+- `public IndexInfo(String iname, String tname, String fname, Transaction tx)`: 构造函数，创建一个 `IndexInfo` 对象。
+- `public int blocksAccessed()`: 返回搜索索引所需的块访问次数（不是索引的大小）。
+- `public int recordsOutput()`: 返回索引中的记录数。
+- `public int distinctValues(String fldname)`: 返回被索引字段的不同值的数量。
+- `public Index open()`: 打开索引（返回一个 `Index` 对象）。
+
+索引的元数据包括其名称、被索引的表名称以及它所索引的字段。`IndexMgr` 方法 `createIndex` 将此元数据存储在目录中。`getIndexInfo` 方法检索指定表上所有索引的元数据。特别是，它返回一个以索引字段为键的 `IndexInfo` 对象映射。该映射的 `keyset` 方法告诉您该表中有哪些字段具有可用索引。`IndexInfo` 方法提供有关所选索引的统计信息，类似于 `StatInfo` 类。`blocksAccessed` 方法返回搜索索引所需的块访问次数（不是索引的大小）。`recordsOutput` 和 `distinctValues` 方法返回索引中的记录数和被索引字段的不同值的数量，这些值与被索引表中的值相同。
+
+`IndexInfo` 对象还具有 `open` 方法，该方法返回索引对应的 `Index` 对象。`Index` 类包含搜索索引的方法，并将在第 12 章讨论。
+
+**图 7.14 使用 SimpleDB 索引管理器 (Using the SimpleDB index manager)**
+
+```java
+// 假设 SimpleDB db = ...; Transaction tx = db.newTx(); 已初始化
+
+SimpleDB db = /* ... */;      // 假设 SimpleDB 实例已创建
+Transaction tx = db.newTx(); // 开启一个新事务
+
+TableMgr tblmgr = /* ... */; // 假设 TableMgr 实例已创建
+StatMgr statmgr = new StatMgr(tblmgr, tx); // 创建 StatMgr 实例
+
+// 创建 IndexMgr 实例，true 表示数据库是新的（如果需要，将创建索引目录表）
+IndexMgr idxmgr = new IndexMgr(true, tblmgr, statmgr, tx);
+
+// 在 "student" 表的 "sid" 字段上创建名为 "sidIdx" 的索引
+idxmgr.createIndex("sidIdx", "student", "sid", tx);
+// 在 "student" 表的 "sname" 字段上创建名为 "snameIdx" 的索引
+idxmgr.createIndex("snameIdx", "student", "sname", tx);
+
+// 获取 "student" 表上所有索引的元数据
+Map<String, IndexInfo> indexes = idxmgr.getIndexInfo("student", tx);
+
+// 遍历每个索引的字段名，并打印其搜索成本
+for (String fldname : indexes.keySet()) {
+    IndexInfo ii = indexes.get(fldname);
+    // 打印字段名和该索引的块访问成本
+    System.out.println(fldname + "\t" + ii.blocksAccessed()); 
+}
+tx.commit(); // 提交事务
+```
+
+图 7.14 的代码片段说明了这些方法的用法。该代码在 `STUDENT` 表上创建了两个索引。然后，它检索它们的元数据，打印每个索引的名称和搜索成本。
+
+图 7.15 给出了 `IndexMgr` 的代码。它将索引元数据存储在**目录表 `idxcat`** 中。该表为每个索引存储一条记录，包含三个字段：索引的名称、被索引的表名称以及被索引的字段名称。构造函数在系统启动期间被调用，如果数据库是新的，则创建此目录表。`createIndex` 和 `getIndexInfo` 方法的代码都很直接。这两个方法都在目录表上打开一个表扫描。`createIndex` 方法插入一条新记录。`getIndexInfo` 方法搜索表中具有指定表名的记录，并将它们插入到 `Map` 中。
+
+**图 7.15 SimpleDB 索引管理器代码 (The code for the SimpleDB index manager)**
+
+```java
+public class IndexMgr {
+    // 存储 idxcat 表的布局
+    private Layout layout; 
+    // 对 TableMgr 和 StatMgr 的引用
+    private TableMgr tblmgr;
+    private StatMgr statmgr;
+
+    // 构造函数
+    public IndexMgr(boolean isnew, TableMgr tblmgr, StatMgr statmgr, Transaction tx) {
+        if (isnew) { // 如果数据库是新创建的
+            Schema sch = new Schema();
+            sch.addStringField("indexname", TableMgr.MAX_NAME); // 索引名
+            sch.addStringField("tablename", TableMgr.MAX_NAME); // 被索引的表名
+            sch.addStringField("fieldname", TableMgr.MAX_NAME); // 被索引的字段名
+            tblmgr.createTable("idxcat", sch, tx); // 创建 idxcat 目录表
+        }
+        this.tblmgr = tblmgr;
+        this.statmgr = statmgr;
+        // 获取 idxcat 表的布局
+        layout = tblmgr.getLayout("idxcat", tx); 
+    }
+
+    // 创建索引的方法
+    public void createIndex(String idxname, String tblname, String fldname, Transaction tx) {
+        TableScan ts = new TableScan(tx, "idxcat", layout); // 打开 idxcat 表的扫描器
+        ts.insert();                                      // 插入新记录
+        ts.setString("indexname", idxname);               // 设置索引名
+        ts.setString("tablename", tblname);               // 设置被索引的表名
+        ts.setString("fieldname", fldname);               // 设置被索引的字段名
+        ts.close();                                       // 关闭扫描器
+    }
+
+    // 获取指定表上所有索引的信息
+    public Map<String, IndexInfo> getIndexInfo(String tblname, Transaction tx) {
+        Map<String, IndexInfo> result = new HashMap<String, IndexInfo>(); // 存储结果的 Map
+        TableScan ts = new TableScan(tx, "idxcat", layout); // 打开 idxcat 表的扫描器
+        while (ts.next()) { // 遍历 idxcat 表记录
+            if (ts.getString("tablename").equals(tblname)) { // 如果找到匹配的表名
+                String idxname = ts.getString("indexname"); // 获取索引名
+                String fldname = ts.getString("fieldname"); // 获取字段名
+
+                // 获取被索引表的布局和统计信息
+                Layout tblLayout = tblmgr.getLayout(tblname, tx);
+                StatInfo tblsi = statmgr.getStatInfo(tblname, tblLayout, tx);
+
+                // 创建 IndexInfo 对象并将其放入结果 Map，以字段名为键
+                IndexInfo ii = new IndexInfo(idxname, fldname, tblLayout.schema(), tx, tblsi);
+                result.put(fldname, ii);
+            }
+        }
+        ts.close(); // 关闭扫描器
+        return result; // 返回包含索引信息的 Map
+    }
+}
+```
+
+`IndexInfo` 类的代码如 图 7.16 所示。构造函数接收索引的名称和被索引的字段，以及持有其关联表的布局和统计元数据的变量。这些元数据允许 `IndexInfo` 对象构建索引记录的模式并估计索引文件的大小。
+
+`open` 方法通过将索引名称和模式传递给 `HashIndex` 构造函数来打开索引。`HashIndex` 类实现了静态哈希索引，并将在第 12 章讨论。要改用 B-树索引，请将此构造函数替换为被注释掉的那个。`blocksAccessed` 方法估计索引的搜索成本。它首先使用索引的 `Layout` 信息来确定每个索引记录的长度，并估计索引的每块记录数 (RPB) 和索引文件的大小。然后它调用索引特定的 `searchCost` 方法来计算该索引类型的块访问次数。`recordsOutput` 方法估计匹配搜索键的索引记录数。`distinctValues` 方法返回与被索引表中相同的值。
+
+**图 7.16 SimpleDB `IndexInfo` 类的代码 (The code for the SimpleDB class IndexInfo)**
+
+```java
+public class IndexInfo {
+    private String idxname, fldname; // 索引名，被索引字段名
+    private Transaction tx;            // 事务对象
+    private Schema tblSchema;         // 被索引表的 Schema
+    private Layout idxLayout;         // 索引记录的布局
+    private StatInfo si;              // 被索引表的统计信息
+
+    // 构造函数
+    public IndexInfo(String idxname, String fldname, Schema tblSchema, Transaction tx, StatInfo si) {
+        this.idxname = idxname;
+        this.fldname = fldname;
+        this.tblSchema = tblSchema; // 保存表的 Schema
+        this.tx = tx;
+        this.idxLayout = createIdxLayout(); // 创建索引记录的布局
+        this.si = si; // 保存表的统计信息
+    }
+
+    // 打开索引，返回 Index 对象
+    public Index open() {
+        // Schema sch = schema(); // 此行似乎未使用
+        return new HashIndex(tx, idxname, idxLayout); // 返回一个 HashIndex 实例
+        // return new BTreeIndex(tx, idxname, idxLayout); // 如果使用 B-Tree 索引，则使用此行
+    }
+
+    // 估计搜索索引所需的块访问次数
+    public int blocksAccessed() {
+        int rpb = tx.blockSize() / idxLayout.slotSize(); // 每块的记录数 (Records Per Block)
+        int numblocks = si.recordsOutput() / rpb;       // 索引文件中的总块数 (基于表记录数和 RPB 估算)
+        return HashIndex.searchCost(numblocks, rpb);     // 调用 HashIndex 的静态方法计算搜索成本
+        // return BTreeIndex.searchCost(numblocks, rpb); // 如果使用 B-Tree 索引，则使用此行
+    }
+
+    // 估计匹配搜索键的记录数
+    public int recordsOutput() {
+        // 假设每个不同的字段值，索引平均指向的记录数
+        return si.recordsOutput() / si.distinctValues(fldname); 
+    }
+
+    // 返回被索引字段的不同值的数量
+    // 如果查询的是被索引字段本身，则返回 1（因为索引是针对特定值的）
+    // 否则，返回表的统计信息中该字段的不同值数量
+    public int distinctValues(String fname) {
+        return fldname.equals(fname) ? 1 : si.distinctValues(fname);
+    }
+
+    // 创建索引记录的布局
+    private Layout createIdxLayout() {
+        Schema sch = new Schema();
+        sch.addIntField("block"); // 索引记录中的块号字段
+        sch.addIntField("id");    // 索引记录中的槽 ID 字段 (记录页中的槽号)
+
+        // 根据被索引字段的类型，添加数据值字段
+        if (tblSchema.type(fldname) == INTEGER) {
+            sch.addIntField("dataval"); // 如果是整数，添加整数数据值字段
+        } else {
+            int fldlen = tblSchema.length(fldname);
+            sch.addStringField("dataval", fldlen); // 如果是字符串，添加字符串数据值字段
+        }
+        return new Layout(sch); // 返回索引记录的布局
+    }
+}
+```
