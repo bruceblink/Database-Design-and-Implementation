@@ -737,3 +737,237 @@ public class IndexInfo {
     }
 }
 ```
+
+## 7.6 实现元数据管理器 (Implementing the Metadata Manager)
+
+SimpleDB 通过隐藏四个独立的管理器类 `TableMgr`、`ViewMgr`、`StatMgr` 和 `IndexMgr` 来简化客户端与元数据管理器的接口。相反，客户端使用 **`MetadataMgr` 类** 作为获取元数据的单一入口点。
+
+`MetadataMgr` API 的代码如 图 7.17 所示。
+
+**图 7.17 SimpleDB 元数据管理器 API (The API for the SimpleDB metadata manager)**
+
+**`MetadataMgr` 类 (MetadataMgr Class)**
+
+- `public void createTable(String tblname, Schema sch, Transaction tx)`: 创建表。
+- `public Layout getLayout(String tblname, Transaction tx)`: 获取表的布局。
+- `public void createView(String viewname, String viewdef, Transaction tx)`: 创建视图。
+- `public String getViewDef(String viewname, Transaction tx)`: 获取视图定义。
+- `public void createIndex(String idxname, String tblname, String fldname, Transaction tx)`: 创建索引。
+- `public Map<String, IndexInfo> getIndexInfo(String tblname, Transaction tx)`: 获取指定表的所有索引信息。
+- `public StatInfo getStatInfo(String tblname, Layout layout, Transaction tx)`: 获取表的统计信息。
+
+此 API 包含每种元数据类型的两个方法——一个方法生成并保存元数据，另一个方法检索它。唯一的例外是统计元数据，其生成方法是内部调用，因此是私有的。图 7.18 给出了 `MetadataMgrTest` 类的代码，它说明了这些方法的用法。
+
+**图 7.18 测试 `MetadataMgr` 方法 (Testing the MetadataMgr methods)**
+
+```java
+public class MetadataMgrTest {
+    public static void main(String[] args) throws Exception {
+        // 创建 SimpleDB 实例，数据库名为 "metadatamgrtest"，块大小 400，缓冲区数量 8
+        SimpleDB db = new SimpleDB("metadatamgrtest", 400, 8);
+        Transaction tx = db.newTx(); // 开启一个新事务
+
+        // 创建 MetadataMgr 实例，true 表示数据库是新的
+        MetadataMgr mdm = new MetadataMgr(true, tx); 
+
+        Schema sch = new Schema();
+        sch.addIntField("A");      // 添加整数字段 A
+        sch.addStringField("B", 9); // 添加字符串字段 B，长度 9
+
+        // Part 1: 表元数据
+        System.out.println("--- Part 1: Table Metadata ---");
+        mdm.createTable("MyTable", sch, tx); // 创建 MyTable
+        Layout layout = mdm.getLayout("MyTable", tx); // 获取 MyTable 的布局
+        int size = layout.slotSize(); // 获取槽大小
+        Schema sch2 = layout.schema(); // 获取表的 Schema
+        System.out.println("MyTable has slot size " + size);
+        System.out.println("Its fields are:");
+        for (String fldname : sch2.fields()) {
+            String type;
+            if (sch2.type(fldname) == SimpleDB.INTEGER) // 使用 SimpleDB.INTEGER 常量
+                type = "int";
+            else {
+                int strlen = sch2.length(fldname);
+                type = "varchar(" + strlen + ")";
+            }
+            System.out.println(fldname + ": " + type);
+        }
+
+        // Part 2: 统计元数据
+        System.out.println("\n--- Part 2: Statistics Metadata ---");
+        TableScan ts = new TableScan(tx, "MyTable", layout); // 打开 MyTable 的扫描器
+        for (int i = 0; i < 50; i++) { // 插入 50 条随机记录
+            ts.insert();
+            int n = (int) Math.round(Math.random() * 50);
+            ts.setInt("A", n);
+            ts.setString("B", "rec" + n);
+        }
+        // 获取 MyTable 的统计信息
+        StatInfo si = mdm.getStatInfo("MyTable", layout, tx); 
+        System.out.println("B(MyTable) = " + si.blocksAccessed());
+        System.out.println("R(MyTable) = " + si.recordsOutput());
+        System.out.println("V(MyTable,A) = " + si.distinctValues("A"));
+        System.out.println("V(MyTable,B) = " + si.distinctValues("B"));
+        ts.close(); // 关闭扫描器
+
+        // Part 3: 视图元数据
+        System.out.println("\n--- Part 3: View Metadata ---");
+        String viewdef = "select B from MyTable where A = 1"; // 视图定义
+        mdm.createView("viewA", viewdef, tx); // 创建视图 viewA
+        String v = mdm.getViewDef("viewA", tx); // 获取视图 viewA 的定义
+        System.out.println("View def = " + v);
+
+        // Part 4: 索引元数据
+        System.out.println("\n--- Part 4: Index Metadata ---");
+        mdm.createIndex("indexA", "MyTable", "A", tx); // 在字段 A 上创建索引 indexA
+        mdm.createIndex("indexB", "MyTable", "B", tx); // 在字段 B 上创建索引 indexB
+
+        // 获取 MyTable 上所有索引的元数据
+        Map<String, IndexInfo> idxmap = mdm.getIndexInfo("MyTable", tx);
+        
+        // 打印 indexA 的属性
+        IndexInfo iiA = idxmap.get("A");
+        System.out.println("B(indexA) = " + iiA.blocksAccessed());
+        System.out.println("R(indexA) = " + iiA.recordsOutput());
+        System.out.println("V(indexA,A) = " + iiA.distinctValues("A"));
+        System.out.println("V(indexA,B) = " + iiA.distinctValues("B")); // 这里的 distinctValues("B") 是错误的，因为 IndexInfo 只关心它自己的 fldname
+
+        // 打印 indexB 的属性
+        IndexInfo iiB = idxmap.get("B");
+        System.out.println("B(indexB) = " + iiB.blocksAccessed());
+        System.out.println("R(indexB) = " + iiB.recordsOutput());
+        System.out.println("V(indexB,A) = " + iiB.distinctValues("A")); // 这里的 distinctValues("A") 是错误的
+        System.out.println("V(indexB,B) = " + iiB.distinctValues("B"));
+        
+        tx.commit(); // 提交事务
+    }
+}
+```
+
+第 1 部分展示了表元数据。它创建了表 `MyTable` 并打印其布局，如 图 7.2 所示。第 2 部分展示了统计管理器。它向 `MyTable` 插入了几条记录并打印了生成的表统计信息。第 3 部分展示了视图管理器，创建了一个视图并检索了视图定义。第 4 部分展示了索引管理器。它在字段 A 和 B 上创建了索引，并打印了每个索引的属性。
+
+`MetadataMgr` 类被称为**门面类 (façade class)**。它的构造函数创建了四个管理器对象并将它们保存在私有变量中。它的方法复制了各个管理器的公共方法。当客户端在元数据管理器上调用一个方法时，该方法会调用相应的局部管理器来完成工作。
+
+其代码如 图 7.19 所示。
+
+------
+
+**图 7.19 SimpleDB `MetadataMgr` 类的代码 (The code for the SimpleDB class MetadataMgr)**
+
+```java
+public class MetadataMgr {
+    // 静态成员，持有各个管理器实例
+    // 警告：这里使用 static 可能是为了方便，但在多线程或多数据库实例场景下可能导致问题。
+    private static TableMgr tblmgr;
+    private static ViewMgr viewmgr;
+    private static StatMgr statmgr;
+    private static IndexMgr idxmgr;
+
+    // 构造函数
+    // isnew: 标记数据库是否是新创建的
+    // tx: 当前事务
+    public MetadataMgr(boolean isnew, Transaction tx) {
+        // 初始化各个管理器
+        tblmgr = new TableMgr(isnew, tx);
+        viewmgr = new ViewMgr(isnew, tblmgr, tx);
+        statmgr = new StatMgr(tblmgr, tx); // 注意 StatMgr 的构造函数会立即刷新统计信息
+        idxmgr = new IndexMgr(isnew, tblmgr, statmgr, tx);
+    }
+
+    // 门面方法：创建表，委托给 TableMgr
+    public void createTable(String tblname, Schema sch, Transaction tx) {
+        tblmgr.createTable(tblname, sch, tx);
+    }
+
+    // 门面方法：获取表布局，委托给 TableMgr
+    public Layout getLayout(String tblname, Transaction tx) {
+        return tblmgr.getLayout(tblname, tx);
+    }
+
+    // 门面方法：创建视图，委托给 ViewMgr
+    public void createView(String viewname, String viewdef, Transaction tx) {
+        viewmgr.createView(viewname, viewdef, tx);
+    }
+
+    // 门面方法：获取视图定义，委托给 ViewMgr
+    public String getViewDef(String viewname, Transaction tx) {
+        return viewmgr.getViewDef(viewname, tx);
+    }
+
+    // 门面方法：创建索引，委托给 IndexMgr
+    public void createIndex(String idxname, String tblname, String fldname, Transaction tx) {
+        idxmgr.createIndex(idxname, tblname, fldname, tx);
+    }
+
+    // 门面方法：获取指定表的所有索引信息，委托给 IndexMgr
+    public Map<String, IndexInfo> getIndexInfo(String tblname, Transaction tx) {
+        return idxmgr.getIndexInfo(tblname, tx);
+    }
+
+    // 门面方法：获取表的统计信息，委托给 StatMgr
+    public StatInfo getStatInfo(String tblname, Layout layout, Transaction tx) {
+        return statmgr.getStatInfo(tblname, layout, tx);
+    }
+}
+```
+
+本书到目前为止的所有测试程序都调用了带有三个参数的 `SimpleDB` 构造函数。该构造函数使用提供的块大小和缓冲区池大小来定制系统的 `FileMgr`、`LogMgr` 和 `BufferMgr` 对象。其目的是帮助调试系统的低级部分，并且不创建 `MetadataMgr` 对象。
+
+SimpleDB 还有另一个带有一个参数的构造函数，即数据库名称。此构造函数用于非调试情况。它首先使用默认值创建文件、日志和缓冲区管理器。然后，它调用恢复管理器来恢复数据库（如果需要恢复），并创建元数据管理器（如果数据库是新的，则包括创建目录文件）。两个 `SimpleDB` 构造函数的代码如 图 7.20 所示。
+
+------
+
+**图 7.20 两个 SimpleDB 构造函数 (The two SimpleDB constructors)**
+
+```java
+// 带有三个参数的构造函数 (用于调试和自定义底层配置)
+public SimpleDB(String dirname, int blocksize, int buffsize) {
+    String homedir = System.getProperty("user.home"); // 获取用户主目录
+    File dbDirectory = new File(homedir, dirname);   // 创建数据库目录路径
+    fm = new FileMgr(dbDirectory, blocksize);       // 初始化文件管理器
+    lm = new LogMgr(fm, "simpledb.log");           // 初始化日志管理器
+    bm = new BufferMgr(fm, lm, buffsize);          // 初始化缓冲区管理器
+}
+
+// 带有单个参数的构造函数 (用于非调试和默认配置)
+public SimpleDB(String dirname) {
+    this(dirname, SimpleDB.BLOCK_SIZE, SimpleDB.BUFFER_SIZE); // 调用三参数构造函数，使用默认块大小和缓冲区大小
+    
+    Transaction tx = new Transaction(fm, lm, bm); // 创建一个临时事务，用于初始化和恢复
+    boolean isnew = fm.isNew(); // 检查数据库是否是新创建的
+    if (isnew) {
+        System.out.println("creating new database");
+    } else {
+        System.out.println("recovering existing database");
+        tx.recover(); // 如果不是新数据库，则进行恢复
+    }
+    mdm = new MetadataMgr(isnew, tx); // 创建 MetadataMgr 实例（将创建目录表如果数据库是新的）
+    tx.commit(); // 提交临时事务
+}
+```
+
+使用这个带一个参数的构造函数，图 7.18 中的 `MetadataMgrTest` 代码可以更简单地重写，如 图 7.21 所示。
+
+**图 7.21 使用带一个参数的 SimpleDB 构造函数 (Using the one-argument SimpleDB constructor)**
+
+```java
+public class MetadataMgrTest {
+    public static void main(String[] args) throws Exception {
+        // 使用单参数构造函数创建 SimpleDB 实例，这将自动处理底层管理器的初始化和恢复
+        SimpleDB db = new SimpleDB("metadatamgrtest"); 
+        
+        // 通过 db.mdMgr() 获取 MetadataMgr 实例
+        MetadataMgr mdm = db.mdMgr(); 
+        
+        Transaction tx = db.newTx(); // 开启一个新的事务
+
+        // ... (其余代码与图 7.18 相同，直接使用 mdm 和 tx)
+        // 例如：
+        // Schema sch = new Schema();
+        // sch.addIntField("A");
+        // sch.addStringField("B", 9);
+        // mdm.createTable("MyTable", sch, tx);
+        // ... (等等)
+    }
+}
+```
