@@ -971,3 +971,105 @@ public class MetadataMgrTest {
     }
 }
 ```
+
+## 7.7 本章总结 (Chapter Summary)
+
+- **元数据 (Metadata)** 是数据库中除了其内容之外的信息。**元数据管理器 (metadata manager)** 是数据库系统中存储和检索其元数据的那部分。
+- SimpleDB 中的数据库元数据分为四类：
+  - **表元数据 (Table metadata)** 描述表的记录结构，例如每个字段的长度、类型和偏移量。
+  - **视图元数据 (View metadata)** 描述每个视图的属性，例如其定义和创建者。
+  - **索引元数据 (Index metadata)** 描述已在表上定义的索引。
+  - **统计元数据 (Statistical metadata)** 描述每个表的大小及其字段值的分布。
+- 元数据管理器将其元数据保存在**系统目录 (system catalog)** 中。目录通常以数据库中的表的形式实现，称为**目录表 (catalog tables)**。目录表可以像数据库中的任何其他表一样进行查询。
+- **表元数据**可以存储在两个目录表中——一个表存储表信息（如槽大小），另一个表存储字段信息（如每个字段的名称、长度和类型）。
+- **视图元数据**主要由视图定义组成，可以保存在其自己的目录表中。视图定义将是任意长的字符串，因此适合使用变长表示。
+- **统计元数据**包含数据库中每个表的规模和值分布信息。商业数据库系统倾向于维护详细、全面的统计数据，例如每个表中每个字段的值和范围直方图，以及不同表中字段之间的相关信息。
+- 一组基本的统计数据包括三个函数：
+  - B(T) 返回表 T 使用的块数。
+  - R(T) 返回表 T 中的记录数。
+  - V(T,F) 返回表 T 中字段 F 的不同值的数量。
+- 统计数据可以存储在目录表中，也可以在每次数据库重新启动时从头计算。前者避免了长时间的启动时间，但可能会减慢事务的执行。
+- **索引元数据**包含每个索引的名称、它所索引的表以及被索引的字段的信息。
+
+## 7.8 建议阅读 (Suggested Reading)
+
+SimpleDB 中使用的目录表尽可能地小，类似于早期 INGRES 系统 (Stonebraker et al. 1976) 中使用的目录表。另一方面，Oracle 目前拥有一个非常庞大的目录，甚至有一本 60 页的书来描述它 (Kreines 2003)。
+
+标准 SQL 定义了一套标准的视图，用于访问数据库元数据。这些视图被称为数据库的**信息模式 (information schema)**。定义了超过 50 个视图表，它们扩展了本章描述的元数据。例如，有视图用于显示触发器、断言、约束、用户定义类型等信息。还有几个视图包含有关权限和角色的信息。其思想是每个数据库系统可以选择以任何方式存储这些元数据，但它有义务提供一个标准的接口来访问这些元数据。详细信息可以在 Gulutzan 和 Pelzer (1999) 的第 16 章中找到。
+
+准确详细的统计元数据对于良好的查询规划至关重要。本章采取的方法是粗略的，而商业系统使用更复杂的技术。Gibbons 等人 (2002) 的文章描述了直方图的使用，并展示了如何在频繁更新的情况下高效地维护它们。直方图信息可以通过各种方式确定，其中一个更有趣的方法是通过小波技术 (Matias et al. 1998)。甚至可以收集以前运行查询的统计信息，然后将其用于规划相关查询 (Bruno and Chaudhuri 2004)。
+
+- Bruno, N., & Chaudhuri, S. (2004). Conditional selectivity for statistics on query expressions. *In Proceedings of the ACM SIGMOD Conference* (pp. 311–322).
+- Gibbons, P., Matias, Y., & Poosala, V. (2002). Fast incremental maintenance of incremental histograms. *ACM Transactions on Database Systems*, *27*(3), 261–298.
+- Gulutzan, P., & Pelzer, T. (1999). *SQL-99 complete, really*. Lawrence, KA: R&D Books.
+- Kreines, D. (2003). *Oracle data dictionary pocket reference*. Sebastopol, CA: O’Reilly.
+- Matias, Y., Vitter, J., & Wang, M. (1998). Wavelet-based histograms for selectivity estimation. *In Proceedings of the ACM SIGMOD Conference* (pp. 448–459).
+- Stonebraker, M., Kreps, P., Wong, E., & Held, G. (1976). The design and implementation of INGRES. *ACM Transactions on Database Systems*, *1*(3), 189–222.
+
+## 7.9 练习 (Exercises)
+
+### 概念性练习 (Conceptual Exercises)
+
+**7.1.** 给出 SimpleDB 为 `tblcat` 和 `fldcat` 表创建的 `tblcat` 和 `fldcat` 记录。(提示：检查 `TableMgr` 的代码。)
+
+**7.2.** 假设事务 T1 只创建表 X，事务 T2 只创建表 Y。
+
+(a) 这些事务可能有哪些并发调度？
+
+(b) T1 和 T2 是否会死锁？请解释。
+
+**7.3.** 标准 SQL 也允许客户端向现有表添加新字段。给出一个实现此功能的好算法。
+
+### 编程练习 (Programming Exercises)
+
+**7.4.** 标准 SQL 允许客户端从现有表中删除字段。假设此功能在 TableMgr 的一个名为 removeField 的方法中实现。
+
+(a) 实现此方法的一种方法是简单地修改字段在 fldcat 中的记录，使其字段名为空白。编写此方法的代码。
+
+(b) 在 (a) 部分中，表的记录都没有改变。它们的已删除字段值会发生什么？为什么它们永远无法被访问？
+
+(c) 实现此方法的另一种方法是删除字段在 fldcat 中的记录，并修改表中所有现有数据记录。这比 (a) 的工作量大得多。这值得吗？解释其中的权衡。
+
+**7.5.** 在 SimpleDB 目录表中，tblcat 的 tblname 字段是其键，fldcat 的 tblname 字段是相应的外键。实现这些表的另一种方法是为 tblcat 使用一个人工键（例如 tblId），并在 fldcat 中使用相应的外键（例如名为 tableId）。
+
+(a) 在 SimpleDB 中实现此设计。
+
+(b) 这种设计比原始设计更好吗？（它节省空间吗？它节省块访问吗？）
+
+**7.6.** 假设 SimpleDB 在创建新数据库的目录表时崩溃。
+
+(a) 描述系统重启后数据库恢复时会发生什么。会出现什么问题？
+
+(b) 修改 SimpleDB 代码以解决此问题。
+
+**7.7.** 编写 SimpleDB 客户端，通过直接查询 tblcat 和 fldcat 表来完成以下每个任务：
+
+(a) 打印数据库中所有表的名称和字段（例如，以“T(A, B)”的形式）。
+
+(b) 重建并打印用于创建特定表的 SQL CREATE TABLE 语句的文本（例如，以“create table T (A integer, B varchar(7))”的形式）。
+
+**7.8.** 当使用不存在的表名调用 `getLayout` 方法时会发生什么？修改代码以返回 `null`。
+
+**7.9.** 当客户端创建与目录中已存在的表同名的表时，会出现什么问题？修改代码以防止这种情况发生。
+
+**7.10.** 修改 `TableMgr` 以包含 `dropTable` 方法，该方法从数据库中删除表。您还需要修改文件管理器吗？
+
+**7.11.** 修改 SimpleDB 代码，使统计信息存储在目录表中，并在每次数据库更改时更新。
+
+**7.12.** 修改 SimpleDB 代码，以便计算每个表 T 和字段 F 的 V(T,F)。(提示：跟踪每个字段的计数可能会占用大量内存，因为不同值的数量可能是无界的。一个合理的想法是计算表中一部分值的数量并进行推断。例如，可以计算读取 1000 个不同值需要多少记录。)
+
+**7.13.** 假设客户端创建了一个表，插入了一些记录，然后进行了回滚。
+
+(a) 目录中表的元数据会发生什么？
+
+(b) 包含数据的文件会发生什么？解释如果客户端随后创建了一个同名但模式不同的表，可能会出现什么问题。
+
+(c) 修复 SimpleDB 代码以解决此问题。
+
+**7.14.** 修改索引管理器，使其还在目录中保存索引的类型。假设有两种类型的索引，分别在 `BTreeIndex` 和 `HashIndex` 类中。这些类的类构造函数和静态方法 `searchCost` 具有相同的参数。
+
+**7.15.** SimpleDB 索引管理器使用表 idxcat 来保存索引信息。另一种设计可能性是将索引信息保存在目录表 fldcat 中。
+
+(a) 比较这两种可能性。每种方法有哪些优点？
+
+(b) 实现这种替代方法。
