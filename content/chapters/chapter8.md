@@ -92,35 +92,7 @@ Q6 的查询树如 图 8.2 所示。
 
 Q8 的输出将是：
 
-| **SId** | **SName** | **MajorId** | **GradYear** | **DId** | **DName** |
-| ------- | --------- | ----------- | ------------ | ------- | --------- |
-| 1       | joe       | 10          | 2021         | 10      | compsci   |
-| 1       | joe       | 10          | 2021         | 20      | math      |
-| 1       | joe       | 10          | 2021         | 30      | drama     |
-| 2       | amy       | 20          | 2020         | 10      | compsci   |
-| 2       | amy       | 20          | 2020         | 20      | math      |
-| 2       | amy       | 20          | 2020         | 30      | drama     |
-| 3       | max       | 10          | 2022         | 10      | compsci   |
-| 3       | max       | 10          | 2022         | 20      | math      |
-| 3       | max       | 10          | 2022         | 30      | drama     |
-| 4       | sue       | 20          | 2022         | 10      | compsci   |
-| 4       | sue       | 20          | 2022         | 20      | math      |
-| 4       | sue       | 20          | 2022         | 30      | drama     |
-| 5       | bob       | 30          | 2020         | 10      | compsci   |
-| 5       | bob       | 30          | 2020         | 20      | math      |
-| 5       | bob       | 30          | 2020         | 30      | drama     |
-| 6       | kim       | 20          | 2020         | 10      | compsci   |
-| 6       | kim       | 20          | 2020         | 20      | math      |
-| 6       | kim       | 20          | 2020         | 30      | drama     |
-| 7       | art       | 30          | 2021         | 10      | compsci   |
-| 7       | art       | 30          | 2021         | 20      | math      |
-| 7       | art       | 30          | 2021         | 30      | drama     |
-| 8       | pat       | 20          | 2019         | 10      | compsci   |
-| 8       | pat       | 20          | 2019         | 20      | math      |
-| 8       | pat       | 20          | 2019         | 30      | drama     |
-| 9       | lee       | 10          | 2021         | 10      | compsci   |
-| 9       | lee       | 10          | 2021         | 20      | math      |
-| 9       | lee       | 10          | 2021         | 30      | drama     |
+![fig8-3](/images/chapter8/fig8-3.png)
 
 查询 Q8 返回 `STUDENT` 和 `DEPT` 表的乘积：
 
