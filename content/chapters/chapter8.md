@@ -164,7 +164,7 @@ public static void printNameAndGradyear(Scan s) {
 
 **`Scan` 接口**
 
-- ```
+- ```java
   public TableScan(Transaction tx, String filename, Layout layout);
   ```
 
