@@ -341,3 +341,279 @@ tx.commit(); // 提交事务
 (a) 部分显示了一个 SQL 语句，它更改了选修第 53 节课的每个学生的成绩，(b) 部分给出了实现此语句的代码。该代码首先创建了一个针对第 53 节所有注册记录的选择扫描；然后它遍历扫描，更改每条记录的成绩。
 
 变量 `s2` 调用 `setString` 方法，因此它必须被声明为 `UpdateScan`。另一方面，`SelectScan` 构造函数的第一个参数是一个 `Scan`，这意味着它不需要被声明为 `UpdateScan`。相反，`s2` 的 `setString` 方法的代码将把其底层扫描（即 `s1`）强制转换为 `UpdateScan`；如果该扫描不可更新，则会抛出 `ClassCastException`。
+
+好的，我将为您翻译 SimpleDB 书中关于查询处理的第 8.4 节内容，详细介绍 SimpleDB 中各种扫描的实现。
+
+## 8.4 实现扫描 (Implementing Scans)
+
+SimpleDB 引擎包含四个 **`Scan` 类**：`TableScan` 类以及用于 `select`、`project` 和 `product` 操作符的类。第 6 章已经探讨了 `TableScan`。以下小节将讨论这三个操作符类。
+
+### 8.4.1 选择扫描 (Select Scans)
+
+`SelectScan` 的代码如 图 8.12 所示。构造函数持有其**底层输入表的扫描 (scan of its underlying input table)**。扫描的当前记录与其底层扫描的当前记录相同，这意味着大多数方法可以通过简单地调用该扫描的相应方法来实现。
+
+唯一不平凡的方法是 **`next()`**。此方法的任务是建立一个新的当前记录。代码循环遍历底层扫描，寻找满足谓词的记录。如果找到这样的记录，它就成为当前记录，并且该方法返回 `true`。如果没有这样的记录，则 `while` 循环将完成，并且该方法将返回 `false`。
+
+**选择扫描是可更新的 (updatable)**。`UpdateScan` 方法假定底层扫描也是可更新的；特别是，它们假定可以将底层扫描强制转换为 `UpdateScan` 而不会引起 `ClassCastException`。由于 SimpleDB 更新规划器创建的扫描只涉及表扫描和选择扫描，因此不应发生此类异常。
+
+**图 8.12 SimpleDB `SelectScan` 类的代码 (The code for the SimpleDB class SelectScan)**
+
+```java
+public class SelectScan implements UpdateScan { // SelectScan 实现了 UpdateScan 接口
+    private Scan s;         // 底层扫描
+    private Predicate pred; // 选择谓词
+
+    // 构造函数
+    public SelectScan(Scan s, Predicate pred) {
+        this.s = s;
+        this.pred = pred;
+    }
+
+    // Scan 方法
+    @Override
+    public void beforeFirst() {
+        s.beforeFirst(); // 将底层扫描重置到起始位置
+    }
+
+    @Override
+    public boolean next() {
+        // 循环遍历底层扫描，直到找到满足谓词的记录
+        while (s.next()) { 
+            if (pred.isSatisfied(s)) { // 如果当前记录满足谓词
+                return true; // 则该记录成为 SelectScan 的当前记录，并返回 true
+            }
+        }
+        return false; // 如果遍历完所有记录都没有找到满足谓词的，则返回 false
+    }
+
+    @Override
+    public int getInt(String fldname) {
+        return s.getInt(fldname); // 直接委托给底层扫描
+    }
+
+    @Override
+    public String getString(String fldname) {
+        return s.getString(fldname); // 直接委托给底层扫描
+    }
+
+    @Override
+    public Constant getVal(String fldname) {
+        return s.getVal(fldname); // 直接委托给底层扫描
+    }
+
+    @Override
+    public boolean hasField(String fldname) {
+        return s.hasField(fldname); // 直接委托给底层扫描
+    }
+
+    @Override
+    public void close() {
+        s.close(); // 关闭底层扫描
+    }
+
+    // UpdateScan 方法 (所有更新操作都通过向下转型并委托给底层可更新扫描实现)
+    @Override
+    public void setInt(String fldname, int val) {
+        // 将底层 Scan 强制转换为 UpdateScan
+        UpdateScan us = (UpdateScan) s; 
+        us.setInt(fldname, val); // 委托给底层 UpdateScan
+    }
+
+    @Override
+    public void setString(String fldname, String val) {
+        UpdateScan us = (UpdateScan) s;
+        us.setString(fldname, val);
+    }
+
+    @Override
+    public void setVal(String fldname, Constant val) {
+        UpdateScan us = (UpdateScan) s;
+        us.setVal(fldname, val);
+    }
+
+    @Override
+    public void delete() {
+        UpdateScan us = (UpdateScan) s;
+        us.delete();
+    }
+
+    @Override
+    public void insert() {
+        UpdateScan us = (UpdateScan) s;
+        us.insert();
+    }
+
+    @Override
+    public RID getRid() {
+        UpdateScan us = (UpdateScan) s;
+        return us.getRid();
+    }
+
+    @Override
+    public void moveToRid(RID rid) {
+        UpdateScan us = (UpdateScan) s;
+        us.moveToRid(rid);
+    }
+}
+```
+
+### 8.4.2 投影扫描 (Project Scans)
+
+`ProjectScan` 的代码如 图 8.13 所示。输出字段列表被传递给构造函数，并用于实现 `hasField` 方法。其他方法只是将其请求转发到底层扫描的相应方法。`getVal`、`getInt` 和 `getString` 方法检查指定的字段名是否在字段列表中；如果不在，则会抛出异常。
+
+**`ProjectScan` 类没有实现 `UpdateScan`**，尽管投影是可更新的。练习 8.12 要求您完成此实现。
+
+**图 8.13 SimpleDB `ProjectScan` 类的代码 (The code for the SimpleDB class ProjectScan)**
+
+```java
+public class ProjectScan implements Scan { // ProjectScan 实现了 Scan 接口，但不是 UpdateScan
+    private Scan s;                     // 底层扫描
+    private Collection<String> fieldlist; // 要投影的字段列表
+
+    // 构造函数
+    public ProjectScan(Scan s, List<String> fieldlist) {
+        this.s = s;
+        this.fieldlist = fieldlist;
+    }
+
+    @Override
+    public void beforeFirst() {
+        s.beforeFirst(); // 直接委托给底层扫描
+    }
+
+    @Override
+    public boolean next() {
+        return s.next(); // 直接委托给底层扫描，ProjectScan 不改变记录的遍历顺序
+    }
+
+    // 获取整数值，如果字段不在投影列表中则抛出异常
+    @Override
+    public int getInt(String fldname) {
+        if (hasField(fldname)) {
+            return s.getInt(fldname);
+        } else {
+            throw new RuntimeException("field not found.");
+        }
+    }
+
+    // 获取字符串值，如果字段不在投影列表中则抛出异常
+    @Override
+    public String getString(String fldname) {
+        if (hasField(fldname)) {
+            return s.getString(fldname);
+        } else {
+            throw new RuntimeException("field not found.");
+        }
+    }
+
+    // 获取 Constant 值，如果字段不在投影列表中则抛出异常
+    @Override
+    public Constant getVal(String fldname) {
+        if (hasField(fldname)) {
+            return s.getVal(fldname);
+        } else {
+            throw new RuntimeException("field not found.");
+        }
+    }
+
+    // 检查字段是否在投影列表中
+    @Override
+    public boolean hasField(String fldname) {
+        return fieldlist.contains(fldname);
+    }
+
+    @Override
+    public void close() {
+        s.close(); // 关闭底层扫描
+    }
+}
+```
+
+### 8.4.3 乘积扫描 (Product Scans)
+
+`ProductScan` 的代码如 图 8.14 所示。乘积扫描需要能够遍历其底层扫描 `s1` 和 `s2` 的所有可能记录组合。它通过从 `s1` 的第一条记录开始，并遍历 `s2` 的每条记录，然后移动到 `s1` 的第二条记录并遍历 `s2`，以此类推。从概念上讲，它就像有一个**嵌套循环 (nested loop)**，外层循环遍历 `s1`，内层循环遍历 `s2`。
+
+**图 8.14 SimpleDB `ProductScan` 类的代码 (The code for the SimpleDB class ProductScan)**
+
+```java
+public class ProductScan implements Scan { // ProductScan 实现了 Scan 接口
+    private Scan s1, s2; // 两个底层扫描
+
+    // 构造函数
+    public ProductScan(Scan s1, Scan s2) {
+        this.s1 = s1;
+        this.s2 = s2;
+        // 在构造时尝试移动到 s1 的第一条记录
+        // 这一步是关键，因为它保证了 next() 方法在第一次调用时能正确处理 s2 的遍历
+        s1.beforeFirst(); // 确保 s1 在开始位置
+        s1.next();         // 移动到 s1 的第一条记录
+        s2.beforeFirst();  // 确保 s2 在开始位置
+    }
+
+    @Override
+    public void beforeFirst() {
+        s1.beforeFirst(); // 重置 s1 到起始位置
+        s1.next();         // 移动到 s1 的第一条记录
+        s2.beforeFirst();  // 重置 s2 到起始位置
+    }
+
+    @Override
+    public boolean next() {
+        if (s2.next()) { // 尝试移动到 s2 的下一条记录
+            return true; // 如果成功，说明找到了一个新的组合，返回 true
+        } else {
+            // s2 已经遍历完毕，需要重置 s2 并移动到 s1 的下一条记录
+            s2.beforeFirst(); // 重置 s2 到起始位置
+            // 尝试移动到 s2 的第一条记录，同时检查 s1 是否有下一条记录
+            return s2.next() && s1.next(); 
+            // 如果 s1.next() 返回 false，则说明 s1 也遍历完毕，整个乘积扫描结束
+        }
+    }
+
+    // 获取字段的整数值，首先检查 s1 是否包含该字段
+    @Override
+    public int getInt(String fldname) {
+        if (s1.hasField(fldname)) {
+            return s1.getInt(fldname);
+        } else {
+            return s2.getInt(fldname); // 否则，从 s2 获取
+        }
+    }
+
+    // 获取字段的字符串值，首先检查 s1 是否包含该字段
+    @Override
+    public String getString(String fldname) {
+        if (s1.hasField(fldname)) {
+            return s1.getString(fldname);
+        } else {
+            return s2.getString(fldname);
+        }
+    }
+
+    // 获取字段的 Constant 值，首先检查 s1 是否包含该字段
+    @Override
+    public Constant getVal(String fldname) {
+        if (s1.hasField(fldname)) {
+            return s1.getVal(fldname);
+        } else {
+            return s2.getVal(fldname);
+        }
+    }
+
+    // 检查字段是否存在于任何一个底层扫描中
+    @Override
+    public boolean hasField(String fldname) {
+        return s1.hasField(fldname) || s2.hasField(fldname);
+    }
+
+    @Override
+    public void close() {
+        s1.close(); // 关闭 s1
+        s2.close(); // 关闭 s2
+    }
+}
+```
+
+`next` 方法实现这种“嵌套循环”思想如下。每次调用 `next` 都会移动到 `s2` 的下一条记录。如果 `s2` 有这样的记录，它就可以返回 `true`。如果不是，则 `s2` 的迭代完成，因此该方法移动到 `s1` 的下一条记录和 `s2` 的第一条记录。如果这可能，它返回 `true`；如果 `s1` 没有更多记录，则扫描完成，`next` 返回 `false`。
+`getVal`、`getInt` 和 `getString` 方法只是访问相应底层扫描的字段。每个方法都检查指定字段是否在扫描 `s1` 中。如果是，则使用 `s1` 访问该字段；否则，使用 `s2` 访问该字段。
+通过这些扫描实现，SimpleDB 能够以模块化的方式处理关系代数操作，并支持复杂的查询执行。
