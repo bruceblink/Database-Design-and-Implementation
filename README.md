@@ -117,7 +117,7 @@ database-design-and-implementation/
    - 7.8 建议阅读（Suggested Reading）
    - 7.9 习题（Exercises）
 
-8. ###  查询处理（Query Processing）
+8. ###  [查询处理（Query Processing）](content/chapters/chapter8.md#第-8-章-查询处理query-processing)
 
    - 8.1 关系代数（Relational Algebra）
    - 8.2 扫描（Scans）
@@ -265,7 +265,7 @@ npm run start
 - [x] 第5章： 事务管理（Transaction Management）
 - [x] 第6章： 记录管理（Record Management）
 - [x] 第7章： 元数据管理（Metadata Management）
-- [ ] 第8章： 查询处理（Query Processing）
+- [x] 第8章： 查询处理（Query Processing）
 - [ ] 第9章： 解析（Parsing）
 - [ ] 第10章： 查询规划（Planning）
 - [ ] 第11章：  JDBC 接口（JDBC Interfaces）
@@ -306,7 +306,7 @@ npm run start
 
 ![部署状态](https://img.shields.io/github/deployments/BruceBlink/database-design-and-implementation/Production?label=vercel&logo=vercel)
 ![最近更新](https://img.shields.io/github/last-commit/BruceBlink/database-design-and-implementation?label=最近更新)
-![翻译进度](https://img.shields.io/badge/翻译进度-47%25-green)
+![翻译进度](https://img.shields.io/badge/翻译进度-53%25-green)
 ![维护状态](https://img.shields.io/badge/维护状态-积极维护-brightgreen)
 ![许可证](https://img.shields.io/badge/许可证-MIT-blue)
 
