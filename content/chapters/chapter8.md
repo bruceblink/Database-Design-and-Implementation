@@ -342,8 +342,6 @@ tx.commit(); // 提交事务
 
 变量 `s2` 调用 `setString` 方法，因此它必须被声明为 `UpdateScan`。另一方面，`SelectScan` 构造函数的第一个参数是一个 `Scan`，这意味着它不需要被声明为 `UpdateScan`。相反，`s2` 的 `setString` 方法的代码将把其底层扫描（即 `s1`）强制转换为 `UpdateScan`；如果该扫描不可更新，则会抛出 `ClassCastException`。
 
-好的，我将为您翻译 SimpleDB 书中关于查询处理的第 8.4 节内容，详细介绍 SimpleDB 中各种扫描的实现。
-
 ## 8.4 实现扫描 (Implementing Scans)
 
 SimpleDB 引擎包含四个 **`Scan` 类**：`TableScan` 类以及用于 `select`、`project` 和 `product` 操作符的类。第 6 章已经探讨了 `TableScan`。以下小节将讨论这三个操作符类。
@@ -707,32 +705,6 @@ pred1.conjoinWith(pred2); // pred1 现在表示 "SName = 'joe' AND MajorId = DId
 ```
 
 图 8.17 给出了 `Constant` 类的代码。每个 `Constant` 对象包含一个 `Integer` 变量和一个 `String` 变量。根据调用了哪个构造函数，只有一个变量将是非 `null` 的。`equals`、`compareTo`、`hashCode` 和 `toString` 方法使用那个非 `null` 的变量。
-
-`Expression` 类的代码如 图 8.18 所示。它也有两个构造函数，一个用于常量表达式，一个用于字段名表达式。每个构造函数都为其关联的变量赋值。`isFieldName` 方法提供了一种方便的方式来确定表达式是否表示字段名。`evaluate` 方法返回表达式相对于扫描的当前输出记录的值。如果表达式是常量，则扫描无关紧要，该方法只返回常量。如果表达式是字段，则该方法从扫描中返回字段的值。`appliesTo` 方法由查询规划器使用，以确定表达式的作用域。
-
-SimpleDB 中的**项 (Terms)** 由 `Term` 接口实现，其代码如 图 8.19 所示。其构造函数接受两个参数，表示左侧和右侧表达式。最重要的方法是 `isSatisfied`，如果两个表达式在给定扫描中评估为相同的值，则返回 `true`。其余方法帮助查询规划器确定项的效果和作用域。例如，`reductionFactor` 方法确定将满足谓词的预期记录数，并将在第 10 章中更详细地讨论。`equatesWithConstant` 和 `equatesWithField` 方法帮助查询规划器决定何时使用索引，并将在第 15 章中讨论。
-
-`Predicate` 类的代码如 图 8.20 所示。谓词实现为**项的列表 (list of terms)**，谓词通过调用其每个项的相应方法来响应其方法。该类有两个构造函数。一个构造函数没有参数，并创建一个没有项的谓词。这样的谓词总是满足的，对应于谓词 `true`。另一个构造函数创建一个包含单个项的谓词。`conjoinWith` 方法将参数谓词中的项添加到指定的谓词中。
-
-好的，我将为您翻译并总结 SimpleDB 第 8 章的剩余部分，包括章节总结。我也会将您提供的 `Constant`、`Expression` 和 `Term` 类的代码整合到适当的位置。
-
-------
-
-## 8.7 章总结 (Chapter Summary)
-
-- **关系代数查询 (relational algebra query)** 由**操作符 (operators)** 组成。每个操作符执行一个专门的任务。查询中操作符的组合可以表示为**查询树 (query tree)**。
-- 本章描述了对理解和翻译 SimpleDB 版本 SQL 有用的三个操作符。它们是：
-  - **选择 (select)**：其输出表与输入表具有相同的列，但删除了一些行。
-  - **投影 (project)**：其输出表与输入表具有相同的行，但删除了一些列。
-  - **乘积 (product)**：其输出表由其两个输入表的所有可能记录组合组成。
-- **扫描 (scan)** 是一个表示关系代数查询树的对象。每个关系操作符都有一个相应的类来实现 **`Scan` 接口**；这些类的对象构成了查询树的内部节点。还有一个用于表的扫描类，其对象构成了树的叶子。
-- **`Scan` 方法**与 `TableScan` 中的方法基本相同。客户端通过扫描进行迭代，从一个输出记录移动到下一个输出记录并检索字段值。扫描通过适当地移动记录文件和比较值来管理查询的实现。
-- 如果扫描中的每条记录 `r` 在某个底层数据库表中都有一个对应的记录 `r0`，则该扫描是**可更新的 (updatable)**。在这种情况下，对虚拟记录 `r` 的更新被定义为对存储记录 `r0` 的更新。
-- 每个扫描类的方法都实现了该操作符的意图。例如：
-  - **选择扫描 (select scan)** 检查其底层扫描中的每条记录，并只返回那些满足其**谓词 (predicate)** 的记录。
-  - **乘积扫描 (product scan)** 为其两个底层扫描的每种记录组合返回一条记录。
-  - **表扫描 (table scan)** 为指定表打开一个记录文件，根据需要锁定缓冲区并获取锁。
-
 **图 8.17 `Constant` 类 (The class Constant)**
 
 ```java
@@ -838,6 +810,7 @@ public class Expression {
 }
 ```
 
+`Expression` 类的代码如 图 8.18 所示。它也有两个构造函数，一个用于常量表达式，一个用于字段名表达式。每个构造函数都为其关联的变量赋值。`isFieldName` 方法提供了一种方便的方式来确定表达式是否表示字段名。`evaluate` 方法返回表达式相对于扫描的当前输出记录的值。如果表达式是常量，则扫描无关紧要，该方法只返回常量。如果表达式是字段，则该方法从扫描中返回字段的值。`appliesTo` 方法由查询规划器使用，以确定表达式的作用域。
 **图 8.19 `Term` 类 (The code for the SimpleDB class Term)**
 
 ```java
@@ -919,6 +892,216 @@ public class Term {
 }
 ```
 
+SimpleDB 中的**项 (Terms)** 由 `Term` 接口实现，其代码如 图 8.19 所示。其构造函数接受两个参数，表示左侧和右侧表达式。最重要的方法是 `isSatisfied`，如果两个表达式在给定扫描中评估为相同的值，则返回 `true`。其余方法帮助查询规划器确定项的效果和作用域。例如，`reductionFactor` 方法确定将满足谓词的预期记录数，并将在第 10 章中更详细地讨论。`equatesWithConstant` 和 `equatesWithField` 方法帮助查询规划器决定何时使用索引，并将在第 15 章中讨论。
+
+**图 8.20 SimpleDB `Predicate` 类的代码**
+
+```java
+public class Predicate {
+    private List<Term> terms = new ArrayList<Term>();
+
+    public Predicate() {}
+
+    public Predicate(Term t) {
+        terms.add(t);
+    }
+
+    public void conjoinWith(Predicate pred) {
+        terms.addAll(pred.terms);
+    }
+
+    public boolean isSatisfied(Scan s) {
+        for (Term t : terms)
+            if (!t.isSatisfied(s))
+                return false;
+        return true;
+    }
+
+    public int reductionFactor(Plan p) {
+        int factor = 1;
+        for (Term t : terms)
+            factor *= t.reductionFactor(p);
+        return factor;
+    }
+
+    public Predicate selectSubPred(Schema sch) {
+        Predicate result = new Predicate();
+        for (Term t : terms)
+            if (t.appliesTo(sch))
+                result.terms.add(t);
+        if (result.terms.size() == 0)
+            return null;
+        else
+            return result;
+    }
+
+    public Predicate joinSubPred(Schema sch1, Schema sch2) {
+        Predicate result = new Predicate();
+        Schema newsch = new Schema();
+        newsch.addAll(sch1);
+        newsch.addAll(sch2);
+        for (Term t : terms)
+            if (!t.appliesTo(sch1) && !t.appliesTo(sch2) && t.appliesTo(newsch))
+                result.terms.add(t);
+        if (result.terms.size() == 0)
+            return null;
+        else
+            return result;
+    }
+
+    public Constant equatesWithConstant(String fldname) {
+        for (Term t : terms) {
+            Constant c = t.equatesWithConstant(fldname);
+            if (c != null)
+                return c;
+        }
+        return null;
+    }
+
+    public String equatesWithField(String fldname) {
+        for (Term t : terms) {
+            String s = t.equatesWithField(fldname);
+            if (s != null)
+                return s;
+        }
+        return null;
+    }
+
+    public String toString() {
+        Iterator<Term> iter = terms.iterator();
+        if (!iter.hasNext())
+            return "";
+        String result = iter.next().toString();
+        while (iter.hasNext())
+            result += " and " + iter.next().toString();
+        return result;
+    }
+}
+```
+
+`Predicate` 类的代码如 图 8.20 所示。谓词实现为**项的列表 (list of terms)**，谓词通过调用其每个项的相应方法来响应其方法。该类有两个构造函数。一个构造函数没有参数，并创建一个没有项的谓词。这样的谓词总是满足的，对应于谓词 `true`。另一个构造函数创建一个包含单个项的谓词。`conjoinWith` 方法将参数谓词中的项添加到指定的谓词中。
+
+## 8.7 章总结 (Chapter Summary)
+
+- **关系代数查询 (relational algebra query)** 由**操作符 (operators)** 组成。每个操作符执行一个专门的任务。查询中操作符的组合可以表示为**查询树 (query tree)**。
+- 本章描述了对理解和翻译 SimpleDB 版本 SQL 有用的三个操作符。它们是：
+  - **选择 (select)**：其输出表与输入表具有相同的列，但删除了一些行。
+  - **投影 (project)**：其输出表与输入表具有相同的行，但删除了一些列。
+  - **乘积 (product)**：其输出表由其两个输入表的所有可能记录组合组成。
+- **扫描 (scan)** 是一个表示关系代数查询树的对象。每个关系操作符都有一个相应的类来实现 **`Scan` 接口**；这些类的对象构成了查询树的内部节点。还有一个用于表的扫描类，其对象构成了树的叶子。
+- **`Scan` 方法**与 `TableScan` 中的方法基本相同。客户端通过扫描进行迭代，从一个输出记录移动到下一个输出记录并检索字段值。扫描通过适当地移动记录文件和比较值来管理查询的实现。
+- 如果扫描中的每条记录 `r` 在某个底层数据库表中都有一个对应的记录 `r0`，则该扫描是**可更新的 (updatable)**。在这种情况下，对虚拟记录 `r` 的更新被定义为对存储记录 `r0` 的更新。
+- 每个扫描类的方法都实现了该操作符的意图。例如：
+  - **选择扫描 (select scan)** 检查其底层扫描中的每条记录，并只返回那些满足其**谓词 (predicate)** 的记录。
+  - **乘积扫描 (product scan)** 为其两个底层扫描的每种记录组合返回一条记录。
+  - **表扫描 (table scan)** 为指定表打开一个记录文件，根据需要锁定缓冲区并获取锁。
+
 - 这些扫描实现被称为**管道化实现 (pipelined implementations)**。管道化实现不会尝试预读、缓存、排序或以其他方式预处理其数据。
 - 管道化实现不构造输出记录。查询树中的每个叶子都是一个**表扫描 (table scan)**，其中包含一个持有该表当前记录的缓冲区。“操作的当前记录”是由每个缓冲区中的记录确定的。获取字段值的请求沿着树向下定向到适当的表扫描；结果从表扫描返回到根节点。
 - 使用管道化实现的扫描以**按需 (need-to-know)** 的方式操作。每个扫描将只从其子节点请求确定其下一条记录所需的记录数量。
+
+## 8.8 建议阅读(Suggested Reading)
+
+几乎所有数据库入门教材都定义了关系代数，尽管每本教材的语法倾向于不同。关于关系代数及其表达能力的详细介绍，可以在 Atzeni 和 DeAntonellis (1992) 的著作中找到。该书还介绍了**关系演算**，它是一种基于谓词逻辑的查询语言。关系演算的有趣之处在于，它可以扩展以允许**递归查询**（即，查询定义中也提及输出表的查询）。递归关系演算被称为 **Datalog**，与 Prolog 编程语言相关。关于 Datalog 及其表达能力的讨论也出现在 Atzeni 和 DeAntonellis (1992) 的著作中。
+
+管道化查询处理的话题只是查询处理难题的一小部分，其中还包括后面章节的主题。Graefe (1993) 的文章包含了关于查询处理技术的全面信息；第 1 节详细讨论了扫描和管道化处理。Chaudhuri (1998) 的文章除了统计数据收集和优化之外，还讨论了查询树。
+
+- Atzeni, P., & DeAntonellis, V. (1992). *关系数据库理论* (Relational database theory). Upper Saddle River, NJ: Prentice-Hall.
+- Chaudhuri, S. (1998). 关系系统中查询优化概述 (An overview of query optimization in relational systems). *ACM 数据库系统原理会议论文集* (In Proceedings of the ACM Principles of Database Systems Conference) (第 34–43 页).
+- Graefe, G. (1993). 大型数据库的查询评估技术 (Query evaluation techniques for large databases). *ACM 计算概览* (ACM Computing Surveys), 25(2), 73–170.
+
+## 8.9 练习(Exercises)
+
+### 概念练习(Conceptual Exercises)
+
+**8.1.** 如果乘积操作的任一输入为空，其输出是什么？
+
+8.2. 使用图 8.9 作为模板，将以下查询实现为扫描：
+
+select sname, dname, grade from STUDENT, DEPT, ENROLL, SECTION where SId=StudentId and SectId=SectionId and DId=MajorId and YearOffered=2020
+
+8.3. 考虑图 8.9 的代码。
+
+(a) 事务需要获得哪些锁才能执行此代码？
+
+(b) 对于这些锁中的每一个，举例说明导致代码等待该锁的情况。
+
+8.4. 考虑 ProductScan 的代码。
+
+(a) 当第一个底层扫描没有记录时，可能会出现什么问题？代码应该如何修复？
+
+(b) 解释为什么当第二个底层扫描没有记录时不会出现问题。
+
+8.5. 假设你想通过 STUDENT 与自身进行乘积运算来查找所有学生对。
+
+(a) 一种方法是在 STUDENT 上创建一个表扫描，并在乘积中两次使用它，如下面代码片段所示：
+
+```java
+Layout layout = mdm.getLayout("student", tx);
+Scan s1 = new TableScan(tx, "student", layout);
+Scan s2 = new ProductScan(s1, s1);
+```
+
+解释为什么在执行扫描时，这会产生不正确（和奇怪）的行为。
+
+(b) 更好的方法是在 STUDENT 上创建两个不同的表扫描，并在它们上创建乘积扫描。这会返回 STUDENT 记录的所有组合，但有一个问题。它是什么？
+
+------
+
+### 编程练习(Programming Exercises)
+
+8.6. ProjectScan 中的 getVal、getInt 和 getString 方法会检查它们的参数字段名是否有效。其他扫描类都没有这样做。对于其他每个扫描类：
+
+(a) 说明如果使用无效字段调用这些方法，会发生什么问题（以及在哪个方法中）。
+
+(b) 修复 SimpleDB 代码，使其抛出适当的异常。
+
+8.7. 目前，SimpleDB 仅支持整数和字符串常量。
+
+(a) 修改 SimpleDB 以支持其他类型的常量，例如短整数、字节数组和日期。
+
+(b) 练习 3.17 要求你修改 Page 类以具有短整数、日期等类型的 get/set 方法。如果你已经完成了这个练习，请在 Scan 和 UpdateScan（及其各种实现类），以及记录管理器、事务管理器和缓冲区管理器中添加类似的 get/set 方法。然后适当地修改 getVal 和 setVal 方法。
+
+**8.8.** 修改表达式以处理整数的算术运算符。
+
+**8.9.** 修改 `Term` 类以处理比较运算符 `<` 和 `>`。
+
+**8.10.** 修改 `Predicate` 类以处理布尔连接词 `and`、`or` 和 `not` 的任意组合。
+
+**8.11.** 在练习 6.13 中，你扩展了 SimpleDB 记录管理器以处理数据库空值。现在扩展查询处理器以处理空值。特别是：
+
+- 适当地修改 `Constant` 类。
+- 修改 `TableScan` 中的 `getVal` 和 `setVal` 方法，使其识别并适当地处理空值。
+- 确定 `Expression`、`Term` 和 `Predicate` 的各种类中哪些需要修改以处理空常量。
+
+**8.12.** 修改 `ProjectScan` 类使其成为一个可更新扫描。
+
+8.13. 练习 6.10 要求你为 TableScan 类编写 previous 和 afterLast 方法。
+
+(a) 修改 SimpleDB，使所有扫描都具有这些方法。
+
+(b) 编写一个程序来测试你的代码。请注意，除非你也扩展了其 JDBC 实现，否则你将无法在 SimpleDB 引擎上测试你的更改。参见练习 11.5。
+
+8.14. rename 操作符接受三个参数：一个输入表，表中字段的名称，以及一个新的字段名称。输出表与输入表相同，只是指定字段已被重命名。例如，以下查询将字段 SName 重命名为 StudentName：
+
+rename(STUDENT, SName, StudentName)
+
+编写一个 RenameScan 类来实现此操作符。此课程将在练习 10.13 中需要。
+
+8.15. extend 操作符接受三个参数：一个输入表、一个表达式和一个新的字段名称。输出表与输入表相同，只是它还包含一个新字段，其值由表达式确定。例如，以下查询扩展 STUDENT，添加一个新字段（称为 JuniorYear），计算学生读大三时的年份：
+
+extend(STUDENT, GradYear-1, JuniorYear)
+
+编写一个 ExtendScan 类来实现此操作符。此课程将在练习 10.14 中需要。
+
+**8.16.** `union` 关系操作符接受两个参数，它们都是表。其输出表包含那些出现在输入表中的记录。联合查询要求两个底层表具有相同的模式；输出表也将具有该模式。编写一个 `UnionScan` 类来实现此操作符。此课程将在练习 10.15 中需要。
+
+8.17. semijoin 操作符接受三个参数：两个表和一个谓词。它返回第一个表中在第二个表中有“匹配”记录的记录。例如，以下查询返回至少有一个学生专业的系：
+
+semijoin(DEPT, STUDENT, Did=MajorId)
+
+类似地，antijoin 操作符返回第一个表中没有匹配记录的记录。例如，以下查询返回没有学生专业的系：
+
+antijoin(DEPT, STUDENT, Did=MajorId)
+
+编写 SemijoinScan 和 AntijoinScan 类来实现这些操作符。这些课程将在练习 10.16 中需要。
