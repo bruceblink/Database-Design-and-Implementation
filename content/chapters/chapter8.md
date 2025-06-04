@@ -676,7 +676,7 @@ SimpleDB 大大简化了允许的常量、表达式、项和谓词。**SimpleDB 
 
 考虑以下谓词：
 
-SName = 'joe' and MajorId = DId
+`SName = 'joe' and MajorId = DId`
 
 图 8.16 的代码片段展示了如何在 SimpleDB 中创建此谓词。请注意谓词是如何**由内而外**创建的，从常量和表达式开始，然后是项，最后是谓词。
 
@@ -713,3 +713,212 @@ pred1.conjoinWith(pred2); // pred1 现在表示 "SName = 'joe' AND MajorId = DId
 SimpleDB 中的**项 (Terms)** 由 `Term` 接口实现，其代码如 图 8.19 所示。其构造函数接受两个参数，表示左侧和右侧表达式。最重要的方法是 `isSatisfied`，如果两个表达式在给定扫描中评估为相同的值，则返回 `true`。其余方法帮助查询规划器确定项的效果和作用域。例如，`reductionFactor` 方法确定将满足谓词的预期记录数，并将在第 10 章中更详细地讨论。`equatesWithConstant` 和 `equatesWithField` 方法帮助查询规划器决定何时使用索引，并将在第 15 章中讨论。
 
 `Predicate` 类的代码如 图 8.20 所示。谓词实现为**项的列表 (list of terms)**，谓词通过调用其每个项的相应方法来响应其方法。该类有两个构造函数。一个构造函数没有参数，并创建一个没有项的谓词。这样的谓词总是满足的，对应于谓词 `true`。另一个构造函数创建一个包含单个项的谓词。`conjoinWith` 方法将参数谓词中的项添加到指定的谓词中。
+
+好的，我将为您翻译并总结 SimpleDB 第 8 章的剩余部分，包括章节总结。我也会将您提供的 `Constant`、`Expression` 和 `Term` 类的代码整合到适当的位置。
+
+------
+
+## 8.7 章总结 (Chapter Summary)
+
+- **关系代数查询 (relational algebra query)** 由**操作符 (operators)** 组成。每个操作符执行一个专门的任务。查询中操作符的组合可以表示为**查询树 (query tree)**。
+- 本章描述了对理解和翻译 SimpleDB 版本 SQL 有用的三个操作符。它们是：
+  - **选择 (select)**：其输出表与输入表具有相同的列，但删除了一些行。
+  - **投影 (project)**：其输出表与输入表具有相同的行，但删除了一些列。
+  - **乘积 (product)**：其输出表由其两个输入表的所有可能记录组合组成。
+- **扫描 (scan)** 是一个表示关系代数查询树的对象。每个关系操作符都有一个相应的类来实现 **`Scan` 接口**；这些类的对象构成了查询树的内部节点。还有一个用于表的扫描类，其对象构成了树的叶子。
+- **`Scan` 方法**与 `TableScan` 中的方法基本相同。客户端通过扫描进行迭代，从一个输出记录移动到下一个输出记录并检索字段值。扫描通过适当地移动记录文件和比较值来管理查询的实现。
+- 如果扫描中的每条记录 `r` 在某个底层数据库表中都有一个对应的记录 `r0`，则该扫描是**可更新的 (updatable)**。在这种情况下，对虚拟记录 `r` 的更新被定义为对存储记录 `r0` 的更新。
+- 每个扫描类的方法都实现了该操作符的意图。例如：
+  - **选择扫描 (select scan)** 检查其底层扫描中的每条记录，并只返回那些满足其**谓词 (predicate)** 的记录。
+  - **乘积扫描 (product scan)** 为其两个底层扫描的每种记录组合返回一条记录。
+  - **表扫描 (table scan)** 为指定表打开一个记录文件，根据需要锁定缓冲区并获取锁。
+
+**图 8.17 `Constant` 类 (The class Constant)**
+
+```java
+public class Constant implements Comparable<Constant> {
+    private Integer ival = null; // 用于存储整数常量
+    private String sval = null;  // 用于存储字符串常量
+
+    // 整数常量构造函数
+    public Constant(Integer ival) {
+        this.ival = ival;
+    }
+
+    // 字符串常量构造函数
+    public Constant(String sval) {
+        this.sval = sval;
+    }
+
+    // 返回整数值
+    public int asInt() {
+        return ival;
+    }
+
+    // 返回字符串值
+    public String asString() {
+        return sval;
+    }
+
+    // 比较两个 Constant 对象是否相等
+    public boolean equals(Object obj) {
+        Constant c = (Constant) obj; // 将 obj 强制转换为 Constant 类型
+        // 如果是整数类型，则比较整数值；否则比较字符串值
+        return (ival != null) ? ival.equals(c.ival) : sval.equals(c.sval);
+    }
+
+    // 比较两个 Constant 对象的大小
+    public int compareTo(Constant c) {
+        // 如果是整数类型，则比较整数值；否则比较字符串值
+        return (ival != null) ? ival.compareTo(c.ival) : sval.compareTo(c.sval);
+    }
+
+    // 返回对象的哈希码
+    public int hashCode() {
+        // 如果是整数类型，则返回整数的哈希码；否则返回字符串的哈希码
+        return (ival != null) ? ival.hashCode() : sval.hashCode();
+    }
+
+    // 返回对象的字符串表示
+    public String toString() {
+        // 如果是整数类型，则返回整数的字符串表示；否则返回字符串的字符串表示
+        return (ival != null) ? ival.toString() : sval.toString();
+    }
+}
+```
+
+**图 8.18 `Expression` 类 (The class Expression)**
+
+```java
+public class Expression {
+    private Constant val = null;  // 用于存储常量值
+    private String fldname = null; // 用于存储字段名
+
+    // 常量表达式构造函数
+    public Expression(Constant val) {
+        this.val = val;
+    }
+
+    // 字段名表达式构造函数
+    public Expression(String fldname) {
+        this.fldname = fldname;
+    }
+
+    // 检查表达式是否为字段名
+    public boolean isFieldName() {
+        return fldname != null;
+    }
+
+    // 返回表达式的常量值
+    public Constant asConstant() {
+        return val;
+    }
+
+    // 返回表达式的字段名
+    public String asFieldName() {
+        return fldname;
+    }
+
+    // 评估表达式的值
+    // 如果是常量，则直接返回常量值；如果是字段名，则从扫描中获取字段值
+    public Constant evaluate(Scan s) {
+        return (val != null) ? val : s.getVal(fldname);
+    }
+
+    // 检查表达式是否适用于给定的 Schema
+    // 如果是常量，则始终适用；如果是字段名，则检查 Schema 是否包含该字段
+    public boolean appliesTo(Schema sch) {
+        return (val != null) ? true : sch.hasField(fldname);
+    }
+
+    // 返回表达式的字符串表示
+    public String toString() {
+        return (val != null) ? val.toString() : fldname;
+    }
+}
+```
+
+**图 8.19 `Term` 类 (The code for the SimpleDB class Term)**
+
+```java
+public class Term {
+    private Expression lhs, rhs; // 左侧和右侧表达式
+
+    // 构造函数
+    public Term(Expression lhs, Expression rhs) {
+        this.lhs = lhs;
+        this.rhs = rhs;
+    }
+
+    // 检查当前扫描记录是否满足该项
+    public boolean isSatisfied(Scan s) {
+        Constant lhsval = lhs.evaluate(s); // 评估左侧表达式
+        Constant rhsval = rhs.evaluate(s); // 评估右侧表达式
+        return rhsval.equals(lhsval);       // 检查两者是否相等
+    }
+
+    // 检查该项是否适用于给定的 Schema
+    public boolean appliesTo(Schema sch) {
+        return lhs.appliesTo(sch) && rhs.appliesTo(sch); // 检查左右表达式是否都适用
+    }
+
+    // 计算该项的筛选因子（降低因子），用于查询优化器
+    public int reductionFactor(Plan p) {
+        String lhsName, rhsName;
+        // 如果左右都是字段名
+        if (lhs.isFieldName() && rhs.isFieldName()) {
+            lhsName = lhs.asFieldName();
+            rhsName = rhs.asFieldName();
+            // 返回两个字段中不同值数量的最大值
+            return Math.max(p.distinctValues(lhsName), p.distinctValues(rhsName));
+        }
+        // 如果只有左侧是字段名
+        if (lhs.isFieldName()) {
+            lhsName = lhs.asFieldName();
+            return p.distinctValues(lhsName); // 返回左侧字段的不同值数量
+        }
+        // 如果只有右侧是字段名
+        if (rhs.isFieldName()) {
+            rhsName = rhs.asFieldName();
+            return p.distinctValues(rhsName); // 返回右侧字段的不同值数量
+        }
+        // 否则，该项比较的是常量
+        if (lhs.asConstant().equals(rhs.asConstant())) {
+            return 1; // 如果常量相等，筛选因子为 1 (所有记录都满足)
+        } else {
+            return Integer.MAX_VALUE; // 如果常量不相等，筛选因子为极大值 (没有记录满足)
+        }
+    }
+
+    // 如果该项将指定字段与常量相等，则返回该常量
+    public Constant equatesWithConstant(String fldname) {
+        if (lhs.isFieldName() && lhs.asFieldName().equals(fldname) && !rhs.isFieldName()) {
+            return rhs.asConstant(); // 左侧是字段名，右侧是常量，且字段名匹配
+        } else if (rhs.isFieldName() && rhs.asFieldName().equals(fldname) && !lhs.isFieldName()) {
+            return lhs.asConstant(); // 右侧是字段名，左侧是常量，且字段名匹配
+        } else {
+            return null; // 不匹配或两者都不是字段名/常量
+        }
+    }
+
+    // 如果该项将指定字段与另一个字段相等，则返回另一个字段名
+    public String equatesWithField(String fldname) {
+        if (lhs.isFieldName() && lhs.asFieldName().equals(fldname) && rhs.isFieldName()) {
+            return rhs.asFieldName(); // 左侧是字段名，右侧也是字段名，且左侧字段名匹配
+        } else if (rhs.isFieldName() && rhs.asFieldName().equals(fldname) && lhs.isFieldName()) {
+            return lhs.asFieldName(); // 右侧是字段名，左侧也是字段名，且右侧字段名匹配
+        } else {
+            return null; // 不匹配或两者都不是字段名
+        }
+    }
+
+    // 返回项的字符串表示
+    public String toString() {
+        return lhs.toString() + "=" + rhs.toString();
+    }
+}
+```
+
+- 这些扫描实现被称为**管道化实现 (pipelined implementations)**。管道化实现不会尝试预读、缓存、排序或以其他方式预处理其数据。
+- 管道化实现不构造输出记录。查询树中的每个叶子都是一个**表扫描 (table scan)**，其中包含一个持有该表当前记录的缓冲区。“操作的当前记录”是由每个缓冲区中的记录确定的。获取字段值的请求沿着树向下定向到适当的表扫描；结果从表扫描返回到根节点。
+- 使用管道化实现的扫描以**按需 (need-to-know)** 的方式操作。每个扫描将只从其子节点请求确定其下一条记录所需的记录数量。
