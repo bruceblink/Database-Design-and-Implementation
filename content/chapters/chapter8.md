@@ -2,7 +2,7 @@
 typora-root-url: ./..\..\public
 ---
 
-# 第 8 章 查询处理 (Chapter 8 Query Processing)
+# 第 8 章 查询处理 (Query Processing)
 
 接下来的三章将探讨数据库引擎如何执行 SQL 查询。问题在于 SQL 查询指定了要返回什么数据，但没有指定如何获取这些数据。解决方案是让引擎实现一组数据检索操作符，称为**关系代数 (relational algebra)**。引擎可以将 SQL 查询翻译成关系代数查询，然后执行。本章将介绍关系代数查询及其实现。接下来的两章将探讨 SQL 到关系代数的翻译。
 
