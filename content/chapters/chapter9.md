@@ -23,7 +23,7 @@ select from tables T1 and T2 where b - 3
 
 语言的语义 (semantics) 指定了语法正确的字符串的实际含义。考虑以下语法上合法的字符串：
 
-select a from x, z where b = 3
+`select a from x, z where b = 3`
 
 您可以推断此语句是一个查询，它请求两个表（名为 `x` 和 `z`）中的一个字段（名为 `a`），并且具有谓词 `b = 3`。因此，该语句可能是有意义的。
 
@@ -130,7 +130,7 @@ public class TokenizerTest {
 }
 ```
 
-## 9.3 The SimpleDB Lexical Analyzer
+## 9.3  SimpleDB的词法分析器 (The SimpleDB Lexical Analyzer)
 
 `StreamTokenizer` 类是一个通用词法分析器，但使用起来可能很笨拙。SimpleDB 的 `Lexer` 类提供了一种更简单的方式供解析器访问标记流。解析器可以调用两种方法：查询当前标记信息的方法，以及告诉词法分析器“消费”当前标记（返回其值并移动到下一个标记）的方法。每种标记类型都有一对相应的方法。这些十个方法的 API 如 图 9.3 所示。
 
