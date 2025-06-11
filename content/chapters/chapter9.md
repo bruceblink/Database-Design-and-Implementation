@@ -335,7 +335,7 @@ public class Lexer {
 
 请注意，解析器不检查类型一致性；因此，后两个字符串在语法上是正确的，即使它们在语义上是不正确的。
 
-第四条规则定义了范畴 <Predicate>，它代表项的布尔组合，类似于 SimpleDB 的 Predicate 类。元字符 [ 和 ] 表示可选内容。因此，规则的右侧匹配任何符合以下模式的标记序列：要么是一个 <Term>，要么是一个 <Term> 后跟一个 AND 关键字标记，然后（递归地）再跟一个 <Predicate>。例如，以下字符串属于 <Predicate>：
+第四条规则定义了范畴 `<Predicate>`，它代表项的布尔组合，类似于 SimpleDB 的 Predicate 类。元字符 [ 和 ] 表示可选内容。因此，规则的右侧匹配任何符合以下模式的标记序列：要么是一个 `<Term>`，要么是一个 `<Term>` 后跟一个 AND 关键字标记，然后（递归地）再跟一个 `<Predicate>`。例如，以下字符串属于 `<Predicate>`：
 
 `DName = 'math'`
 
@@ -352,8 +352,6 @@ public class Lexer {
 ![fig9-6](/images/chapter9/fig9-6.png)
 
 在此图中，树的叶节点出现在树的底部，以便更容易阅读输入字符串。从根节点开始，该树断言整个字符串是一个 `<Predicate>`，因为 “DName='math'” 是一个 `<Term>` ，“GradYear=SName” 是一个 `<Predicate>`。你可以类似地展开每个子树。例如，“DName='math'” 是一个 `<Term>`，因为 “DName” 和 “'math'” 都属于 `<Expression>`。
-
-------
 
 **图 9.7 SimpleDB SQL 子集的完整语法 (The grammar for the SimpleDB subset of SQL)**
 
@@ -395,5 +393,3 @@ public class Lexer {
 项目列表在 SQL 中经常出现。例如，在查询中，`select` 子句包含逗号分隔的字段列表，`from` 子句包含逗号分隔的标识符列表，`where` 子句包含 `AND` 分隔的项列表。每个列表都使用您在 `<Predicate>` 中看到的相同递归技术在语法中指定。还要注意在 `<Query>`、`<Delete>` 和 `<Modify>` 的规则中如何使用“可选括号”表示法，以允许它们具有可选的 `where` 子句。
 
 我提到解析器不能强制执行类型兼容性，因为它无法知道它所看到标识符的类型。解析器也不能强制执行兼容的列表大小。例如，SQL `insert` 语句必须提及与字段名相同数量的值，但 `<Insert>` 的语法规则只要求字符串具有 `<FieldList>` 和 `<ConstList>`。**规划器 (planner)** 必须负责验证这些列表的大小相同（并且类型兼容）。
-
-------
