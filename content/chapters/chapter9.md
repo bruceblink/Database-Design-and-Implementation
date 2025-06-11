@@ -296,3 +296,104 @@ public class Lexer {
 ```
 
 `StreamTokenizer` 的 `nextToken` 方法会抛出 `IOException`。`Lexer` 的 `nextToken` 方法将此异常转换为 `BadSyntaxException`，该异常会传递回客户端（并转换为 `SQLException`，如第 11 章所述）。
+
+## 9.4 语法 (Grammars)
+
+语法 (grammar) 是一组规则，描述了标记如何合法地组合。以下是一个语法规则的示例：
+
+`<Field> := IdTok`
+
+语法规则的左侧指定了一个**句法范畴 (syntactic category)**。句法范畴表示语言中的特定概念。在上述规则中，`<Field>` 表示字段名的概念。语法规则的右侧是一个**模式 (pattern)**，它指定了属于该句法范畴的字符串集合。在上述规则中，模式就是 `IdTok`，它匹配任何标识符标记。因此，`<Field>` 包含与标识符对应的字符串集合。
+
+每个句法范畴都可以被视为其自己的小语言。例如，“SName”和“Glop”都是 `<Field>` 的成员。请记住，标识符不必有意义——它们只需要是标识符。因此，“Glop”是 `<Field>` 的一个非常好的成员，即使在 SimpleDB 大学数据库中也是如此。然而，“select”不会是 `<Field>` 的成员，因为它是一个关键字标记，而不是标识符标记。
+
+语法规则右侧的模式可以包含对标记 (tokens) 和句法范畴 (syntactic categories) 的引用。具有众所周知值（即关键字和分隔符）的标记会显式出现。其他标记（标识符、整数常量和字符串常量）分别写作 IdTok、IntTok 和 StrTok。三个元字符 (meta-characters)（[, ], 和 |）用作标点符号；这些字符在语言中不是分隔符，因此它们可以帮助表达模式。为了说明这一点，考虑以下四个额外的语法规则：
+
+```txt
+<Constant> := StrTok | IntTok
+
+<Expression> := <Field> | <Constant>
+
+<Term> := <Expression> = <Expression>
+
+<Predicate> := <Term> [ AND <Predicate> ]
+```
+
+第一条规则定义了范畴 `<Constant>`，它代表任何常量——字符串或整数。元字符 `|` 表示“或”。因此，范畴 `<Constant>` 匹配字符串标记或整数标记，其内容（作为一种语言）将包含所有字符串常量以及所有整数常量。
+
+第二条规则定义了范畴 `<Expression>`，它表示不带操作符的表达式。该规则指定表达式是字段或常量。
+
+第三条规则定义了范畴 `<Term>`，它表示表达式之间简单的相等项（类似于 SimpleDB 的 Term 类）。例如，以下字符串属于 `<Term>`：
+
+`DeptId = DId`
+
+`'math' = DName`
+
+`SName = 123`
+
+`65 = 'abc'`
+
+请注意，解析器不检查类型一致性；因此，后两个字符串在语法上是正确的，即使它们在语义上是不正确的。
+
+第四条规则定义了范畴 <Predicate>，它代表项的布尔组合，类似于 SimpleDB 的 Predicate 类。元字符 [ 和 ] 表示可选内容。因此，规则的右侧匹配任何符合以下模式的标记序列：要么是一个 <Term>，要么是一个 <Term> 后跟一个 AND 关键字标记，然后（递归地）再跟一个 <Predicate>。例如，以下字符串属于 <Predicate>：
+
+`DName = 'math'`
+
+`Id = 3 AND DName = 'math'`
+
+`MajorId = DId AND Id = 3 AND DName = 'math'`
+
+第一个字符串是 `<Term>` 形式。后两个字符串是 `<Term> AND <Predicate>` 形式。
+
+如果一个字符串属于特定的句法范畴，你可以画一个解析树 (parse tree) 来描绘其原因。解析树将句法范畴作为其内部节点，将标记作为其叶节点。范畴节点的子节点对应于语法规则的应用。例如，图 9.6 包含以下字符串的解析树：
+
+`DName = 'math' AND GradYear = SName`
+
+![fig9-6](/images/chapter9/fig9-6.png)
+
+在此图中，树的叶节点出现在树的底部，以便更容易阅读输入字符串。从根节点开始，该树断言整个字符串是一个 `<Predicate>`，因为 “DName='math'” 是一个 `<Term>` ，“GradYear=SName” 是一个 `<Predicate>`。你可以类似地展开每个子树。例如，“DName='math'” 是一个 `<Term>`，因为 “DName” 和 “'math'” 都属于 `<Expression>`。
+
+------
+
+**图 9.7 SimpleDB SQL 子集的完整语法 (The grammar for the SimpleDB subset of SQL)**
+
+```txt
+<Field> := IdTok
+<Constant> := StrTok | IntTok
+<Expression> := <Field> | <Constant>
+<Term> := <Expression> = <Expression>
+<Predicate> := <Term> [ AND <Predicate> ]
+
+<Query> := SELECT <SelectList> FROM <TableList> [ WHERE <Predicate> ]
+<SelectList> := <Field> [ , <SelectList> ]
+<TableList> := IdTok [ , <TableList> ]
+
+<UpdateCmd> := <Insert> | <Delete> | <Modify> | <Create>
+
+<Create> := <CreateTable> | <CreateView> | <CreateIndex>
+
+<Insert> := INSERT INTO IdTok ( <FieldList> ) VALUES ( <ConstList> )
+<FieldList> := <Field> [ , <FieldList> ]
+<ConstList> := <Constant> [ , <ConstList> ]
+
+<Delete> := DELETE FROM IdTok [ WHERE <Predicate> ]
+
+<Modify> := UPDATE IdTok SET <Field> = <Expression> [ WHERE <Predicate> ]
+
+<CreateTable> := CREATE TABLE IdTok ( <FieldDefs> )
+<FieldDefs> := <FieldDef> [ , <FieldDefs> ]
+<FieldDef> := IdTok <TypeDef>
+<TypeDef> := INT | VARCHAR ( IntTok )
+
+<CreateView> := CREATE VIEW IdTok AS <Query>
+
+<CreateIndex> := CREATE INDEX IdTok ON IdTok ( <Field> )
+```
+
+图 9.7 列出了 SimpleDB 支持的 SQL 子集的完整语法。语法规则分为九个部分：一个部分用于常见构造，如谓词、表达式和字段；一个部分用于查询；以及七个部分用于各种类型的更新语句。
+
+项目列表在 SQL 中经常出现。例如，在查询中，`select` 子句包含逗号分隔的字段列表，`from` 子句包含逗号分隔的标识符列表，`where` 子句包含 `AND` 分隔的项列表。每个列表都使用您在 `<Predicate>` 中看到的相同递归技术在语法中指定。还要注意在 `<Query>`、`<Delete>` 和 `<Modify>` 的规则中如何使用“可选括号”表示法，以允许它们具有可选的 `where` 子句。
+
+我提到解析器不能强制执行类型兼容性，因为它无法知道它所看到标识符的类型。解析器也不能强制执行兼容的列表大小。例如，SQL `insert` 语句必须提及与字段名相同数量的值，但 `<Insert>` 的语法规则只要求字符串具有 `<FieldList>` 和 `<ConstList>`。**规划器 (planner)** 必须负责验证这些列表的大小相同（并且类型兼容）。
+
+------
