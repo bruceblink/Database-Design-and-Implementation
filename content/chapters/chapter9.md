@@ -394,8 +394,6 @@ public class Lexer {
 
 我提到解析器不能强制执行类型兼容性，因为它无法知道它所看到标识符的类型。解析器也不能强制执行兼容的列表大小。例如，SQL `insert` 语句必须提及与字段名相同数量的值，但 `<Insert>` 的语法规则只要求字符串具有 `<FieldList>` 和 `<ConstList>`。**规划器 (planner)** 必须负责验证这些列表的大小相同（并且类型兼容）。
 
-好的，这是您提供的 SimpleDB 第 9 章关于“递归下降解析器”内容的翻译。
-
 ## 9.5 递归下降解析器 (Recursive-Descent Parsers)
 
 解析树可以被认为是给定字符串在语法上合法的证明。但你如何确定解析树呢？数据库引擎如何判断一个字符串在语法上是否合法？
@@ -464,3 +462,560 @@ public class PredParser {
 `predicate` 方法演示了如何实现**递归规则 (recursive rule)**。它首先调用 `term` 方法，然后检查当前标记是否是关键字 `AND`。如果是，它会消费 `AND` 标记并递归调用自身。如果当前标记不是 `AND`，那么它知道它已经看到了列表中最后一个项并返回。因此，对 `predicate` 的调用将尽可能多地从标记流中消费标记——如果它看到一个 `AND` 标记，即使它已经看到了一个有效的谓词，它也会继续前进。
 
 递归下降解析的有趣之处在于，**方法调用的序列决定了输入字符串的解析树**。练习 9.4 要求你修改每个方法的代码以打印其名称，并适当缩进；结果将类似于一个横向的解析树。
+
+## 9.6 为解析器添加动作 (Adding Actions to the Parser)
+
+基本的递归下降解析算法在输入字符串语法有效时正常返回。尽管这种行为有些有趣，但它并不是特别有用。为此，需要修改基本解析器以返回规划器所需的信息。这种修改称为**为解析器添加动作 (adding actions to the parser)**。
+
+一般来说，SQL 解析器应该从 SQL 语句中提取诸如表名、字段名、谓词和常量等信息。提取的内容取决于 SQL 语句的类型：
+
+- **对于查询 (Query)**：一个字段名列表（来自 `select` 子句）、一个表名集合（来自 `from` 子句）和一个谓词（来自 `where` 子句）。
+- **对于插入 (Insertion)**：一个表名、一个字段名列表和一个值列表。
+- **对于删除 (Deletion)**：一个表名和一个谓词。
+- **对于修改 (Modification)**：一个表名、要修改的字段名、一个表示新字段值的表达式和一个谓词。
+- **对于表创建 (Table Creation)**：一个表名及其模式。
+- **对于视图创建 (View Creation)**：一个表名及其定义。
+- **对于索引创建 (Index Creation)**：一个索引名、一个表名和被索引字段的名称。
+
+这些信息可以通过 `Lexer` 方法的返回值从标记流中提取。因此，修改每个解析器方法的策略是直接的：从对 `eatId`、`eatStringConstant` 和 `eatIntConstant` 的调用中获取返回值，将它们组装成一个适当的对象，并将该对象返回给方法的调用者。
+
+图 9.9 给出了 `Parser` 类的代码，其方法实现了图 9.7 的语法。以下小节将详细分析这些代码。
+
+### 9.6.1 解析谓词和表达式 (Parsing Predicates and Expressions)
+
+解析器的核心部分处理定义谓词和表达式的五条语法规则，因为它们用于解析几种不同类型的 SQL 语句。`Parser` 中的这些方法与 `PredParser`（在图 9.8 中）中的方法相同，只是它们现在包含了动作并返回了值。特别是，`field` 方法从当前标记中获取字段名并返回它。`constant`、`expression`、`term` 和 `predicate` 方法类似，分别返回一个 `Constant` 对象、一个 `Expression` 对象、一个 `Term` 对象和一个 `Predicate` 对象。
+
+### 9.6.2 解析查询 (Parsing Queries)
+
+`query` 方法实现了句法范畴 `<Query>`。当解析器解析一个查询时，它会获取规划器所需的三个项——字段名、表名和谓词——并将它们保存在一个 `QueryData` 对象中。`QueryData` 类通过其 `fields`、`tables` 和 `pred` 方法使这些值可用；参见图 9.10。该类还有一个 `toString` 方法，用于重新创建查询字符串。在处理视图定义时将需要此方法。
+
+**图 9.9 SimpleDB `Parser` 类的代码 (The code for the SimpleDB class Parser)**
+
+```java
+import simpledb.query.*; // 假设包含 Predicate, Constant, Expression, Term 等类
+import simpledb.record.Schema; // 假设包含 Schema 类
+import java.util.*;
+
+public class Parser {
+    private Lexer lex; // 词法分析器实例
+
+    public Parser(String s) {
+        lex = new Lexer(s); // 构造函数初始化词法分析器
+    }
+
+    // --- 解析谓词及其组件的方法 ---
+
+    // 实现 <Field> := IdTok
+    public String field() {
+        return lex.eatId(); // 消费并返回标识符（字段名）
+    }
+
+    // 实现 <Constant> := StrTok | IntTok
+    public Constant constant() {
+        if (lex.matchStringConstant()) {
+            return new Constant(lex.eatStringConstant()); // 消费字符串常量并返回 Constant 对象
+        } else {
+            return new Constant(lex.eatIntConstant());    // 消费整数常量并返回 Constant 对象
+        }
+    }
+
+    // 实现 <Expression> := <Field> | <Constant>
+    public Expression expression() {
+        if (lex.matchId()) {
+            return new Expression(field()); // 如果是标识符，解析为字段表达式
+        } else {
+            return new Expression(constant()); // 否则，解析为常量表达式
+        }
+    }
+
+    // 实现 <Term> := <Expression> = <Expression>
+    public Term term() {
+        Expression lhs = expression(); // 解析左侧表达式
+        lex.eatDelim('=');           // 消费等号分隔符
+        Expression rhs = expression(); // 解析右侧表达式
+        return new Term(lhs, rhs);    // 返回一个新的 Term 对象
+    }
+
+    // 实现 <Predicate> := <Term> [ AND <Predicate> ]
+    public Predicate predicate() {
+        Predicate pred = new Predicate(term()); // 解析第一个项并创建 Predicate 对象
+        if (lex.matchKeyword("and")) {        // 如果有 "and" 关键字
+            lex.eatKeyword("and");
+            pred.conjoinWith(predicate());    // 递归解析剩余谓词并连接
+        }
+        return pred;
+    }
+
+    // --- 解析查询的方法 ---
+
+    // 实现 <Query> := SELECT <SelectList> FROM <TableList> [ WHERE <Predicate> ]
+    public QueryData query() {
+        lex.eatKeyword("select");           // 消费 "select" 关键字
+        List<String> fields = selectList(); // 解析选择列表
+        lex.eatKeyword("from");             // 消费 "from" 关键字
+        Collection<String> tables = tableList(); // 解析表列表
+        Predicate pred = new Predicate();     // 默认创建一个空谓词
+        if (lex.matchKeyword("where")) {      // 如果有 "where" 子句
+            lex.eatKeyword("where");
+            pred = predicate();             // 解析谓词
+        }
+        return new QueryData(fields, tables, pred); // 返回 QueryData 对象
+    }
+
+    // 解析选择列表 <SelectList> := <Field> [ , <SelectList> ]
+    private List<String> selectList() {
+        List<String> L = new ArrayList<String>();
+        L.add(field()); // 添加第一个字段
+        if (lex.matchDelim(',')) { // 如果有逗号
+            lex.eatDelim(',');
+            L.addAll(selectList()); // 递归解析并添加剩余字段
+        }
+        return L;
+    }
+
+    // 解析表列表 <TableList> := IdTok [ , <TableList> ]
+    private Collection<String> tableList() {
+        Collection<String> L = new ArrayList<String>();
+        L.add(lex.eatId()); // 添加第一个表名
+        if (lex.matchDelim(',')) { // 如果有逗号
+            lex.eatDelim(',');
+            L.addAll(tableList()); // 递归解析并添加剩余表名
+        }
+        return L;
+    }
+
+    // --- 解析各种更新命令的方法 ---
+
+    // 实现 <UpdateCmd> := <Insert> | <Delete> | <Modify> | <Create>
+    public Object updateCmd() {
+        if (lex.matchKeyword("insert")) {
+            return insert(); // 解析插入语句
+        } else if (lex.matchKeyword("delete")) {
+            return delete(); // 解析删除语句
+        } else if (lex.matchKeyword("update")) {
+            return modify(); // 解析修改语句
+        } else {
+            return create(); // 解析创建语句 (表、视图、索引)
+        }
+    }
+
+    // 实现 <Create> := <CreateTable> | <CreateView> | <CreateIndex>
+    private Object create() {
+        lex.eatKeyword("create");
+        if (lex.matchKeyword("table")) {
+            return createTable(); // 解析创建表语句
+        } else if (lex.matchKeyword("view")) {
+            return createView(); // 解析创建视图语句
+        } else {
+            return createIndex(); // 解析创建索引语句
+        }
+    }
+
+    // --- 解析删除命令的方法 ---
+
+    // 实现 <Delete> := DELETE FROM IdTok [ WHERE <Predicate> ]
+    public DeleteData delete() {
+        lex.eatKeyword("delete");
+        lex.eatKeyword("from");
+        String tblname = lex.eatId(); // 消费并获取表名
+        Predicate pred = new Predicate(); // 默认创建一个空谓词
+        if (lex.matchKeyword("where")) { // 如果有 "where" 子句
+            lex.eatKeyword("where");
+            pred = predicate(); // 解析谓词
+        }
+        return new DeleteData(tblname, pred); // 返回 DeleteData 对象
+    }
+
+    // --- 解析插入命令的方法 ---
+
+    // 实现 <Insert> := INSERT INTO IdTok ( <FieldList> ) VALUES ( <ConstList> )
+    public InsertData insert() {
+        lex.eatKeyword("insert");
+        lex.eatKeyword("into");
+        String tblname = lex.eatId(); // 消费并获取表名
+        lex.eatDelim('(');
+        List<String> flds = fieldList(); // 解析字段列表
+        lex.eatDelim(')');
+        lex.eatKeyword("values");
+        lex.eatDelim('(');
+        List<Constant> vals = constList(); // 解析常量列表
+        lex.eatDelim(')');
+        return new InsertData(tblname, flds, vals); // 返回 InsertData 对象
+    }
+
+    // 解析字段列表 <FieldList> := <Field> [ , <FieldList> ]
+    private List<String> fieldList() {
+        List<String> L = new ArrayList<String>();
+        L.add(field()); // 添加第一个字段
+        if (lex.matchDelim(',')) {
+            lex.eatDelim(',');
+            L.addAll(fieldList()); // 递归解析并添加剩余字段
+        }
+        return L;
+    }
+
+    // 解析常量列表 <ConstList> := <Constant> [ , <ConstList> ]
+    private List<Constant> constList() {
+        List<Constant> L = new ArrayList<Constant>();
+        L.add(constant()); // 添加第一个常量
+        if (lex.matchDelim(',')) {
+            lex.eatDelim(',');
+            L.addAll(constList()); // 递归解析并添加剩余常量
+        }
+        return L;
+    }
+
+    // --- 解析修改命令的方法 ---
+
+    // 实现 <Modify> := UPDATE IdTok SET <Field> = <Expression> [ WHERE <Predicate> ]
+    public ModifyData modify() {
+        lex.eatKeyword("update");
+        String tblname = lex.eatId(); // 消费并获取表名
+        lex.eatKeyword("set");
+        String fldname = field(); // 消费并获取要修改的字段名
+        lex.eatDelim('=');
+        Expression newval = expression(); // 解析新值表达式
+        Predicate pred = new Predicate(); // 默认创建一个空谓词
+        if (lex.matchKeyword("where")) { // 如果有 "where" 子句
+            lex.eatKeyword("where");
+            pred = predicate(); // 解析谓词
+        }
+        return new ModifyData(tblname, fldname, newval, pred); // 返回 ModifyData 对象
+    }
+
+    // --- 解析创建表命令的方法 ---
+
+    // 实现 <CreateTable> := CREATE TABLE IdTok ( <FieldDefs> )
+    public CreateTableData createTable() {
+        lex.eatKeyword("table");
+        String tblname = lex.eatId(); // 消费并获取表名
+        lex.eatDelim('(');
+        Schema sch = fieldDefs(); // 解析字段定义列表
+        lex.eatDelim(')');
+        return new CreateTableData(tblname, sch); // 返回 CreateTableData 对象
+    }
+
+    // 解析字段定义列表 <FieldDefs> := <FieldDef> [ , <FieldDefs> ]
+    private Schema fieldDefs() {
+        Schema schema = fieldDef(); // 解析第一个字段定义
+        if (lex.matchDelim(',')) {
+            lex.eatDelim(',');
+            Schema schema2 = fieldDefs(); // 递归解析剩余字段定义
+            schema.addAll(schema2);     // 将所有字段定义合并到同一个 Schema
+        }
+        return schema;
+    }
+
+    // 解析单个字段定义 <FieldDef> := IdTok <TypeDef>
+    private Schema fieldDef() {
+        String fldname = field(); // 获取字段名
+        return fieldType(fldname); // 解析字段类型并返回包含该字段的 Schema
+    }
+
+    // 解析字段类型 <TypeDef> := INT | VARCHAR ( IntTok )
+    private Schema fieldType(String fldname) {
+        Schema schema = new Schema();
+        if (lex.matchKeyword("int")) {
+            lex.eatKeyword("int");
+            schema.addIntField(fldname); // 添加整数类型字段
+        } else {
+            lex.eatKeyword("varchar");
+            lex.eatDelim('(');
+            int strLen = lex.eatIntConstant(); // 获取 VARCHAR 长度
+            lex.eatDelim(')');
+            schema.addStringField(fldname, strLen); // 添加字符串类型字段
+        }
+        return schema;
+    }
+
+    // --- 解析创建视图命令的方法 ---
+
+    // 实现 <CreateView> := CREATE VIEW IdTok AS <Query>
+    public CreateViewData createView() {
+        lex.eatKeyword("view");
+        String viewname = lex.eatId(); // 消费并获取视图名
+        lex.eatKeyword("as");
+        QueryData qd = query(); // 解析底层查询
+        return new CreateViewData(viewname, qd); // 返回 CreateViewData 对象
+    }
+
+    // --- 解析创建索引命令的方法 ---
+
+    // 实现 <CreateIndex> := CREATE INDEX IdTok ON IdTok ( <Field> )
+    public CreateIndexData createIndex() {
+        lex.eatKeyword("index");
+        String idxname = lex.eatId(); // 消费并获取索引名
+        lex.eatKeyword("on");
+        String tblname = lex.eatId(); // 消费并获取表名
+        lex.eatDelim('(');
+        String fldname = field(); // 消费并获取索引字段名
+        lex.eatDelim(')');
+        return new CreateIndexData(idxname, tblname, fldname); // 返回 CreateIndexData 对象
+    }
+}
+```
+
+**图 9.10 SimpleDB `QueryData` 类的代码 (The code for the SimpleDB class QueryData)**
+
+```java
+import simpledb.query.Predicate; // 假设包含 Predicate 类
+import java.util.*;
+
+public class QueryData {
+    private List<String> fields; // 选择列表中的字段名
+    private Collection<String> tables; // FROM 子句中的表名
+    private Predicate pred; // WHERE 子句中的谓词
+
+    // 构造函数
+    public QueryData(List<String> fields, Collection<String> tables, Predicate pred) {
+        this.fields = fields;
+        this.tables = tables;
+        this.pred = pred;
+    }
+
+    // 返回字段列表
+    public List<String> fields() {
+        return fields;
+    }
+
+    // 返回表集合
+    public Collection<String> tables() {
+        return tables;
+    }
+
+    // 返回谓词
+    public Predicate pred() {
+        return pred;
+    }
+
+    // 重写 toString 方法，用于重新创建查询字符串
+    public String toString() {
+        String result = "select ";
+        for (String fldname : fields) {
+            result += fldname + ", ";
+        }
+        result = result.substring(0, result.length() - 2); // 移除末尾的逗号和空格
+
+        result += " from ";
+        for (String tblname : tables) {
+            result += tblname + ", ";
+        }
+        result = result.substring(0, result.length() - 2); // 移除末尾的逗号和空格
+
+        String predstring = pred.toString();
+        if (!predstring.equals("")) { // 如果谓词不为空
+            result += " where " + predstring;
+        }
+        return result;
+    }
+}
+```
+
+## 9.6.3 解析更新语句 (Parsing Updates)
+
+解析器方法 **`updateCmd`** 实现了句法范畴 **`<UpdateCmd>`**，它表示各种 SQL 更新语句的集合。在 JDBC 方法 `executeUpdate` 执行期间，会调用此方法来确定命令所表示的更新类型。该方法利用字符串的初始标记来识别命令，然后分派给特定命令的解析器方法。每个更新方法都有不同的返回类型，因为每个方法从其命令字符串中提取的信息不同；因此，`updateCmd` 方法返回一个 `Object` 类型的值。
+
+## 9.6.4 解析插入语句 (Parsing Insertions)
+
+解析器方法 **`insert`** 实现了句法范畴 **`<Insert>`**。此方法提取三个项：**表名 (table name)**、**字段列表 (field list)** 和**值列表 (value list)**。图 9.11 所示的 **`InsertData`** 类保存这些值并使其可通过访问器方法获取。
+
+**图 9.11 SimpleDB `InsertData` 类的代码 (The code for the SimpleDB class InsertData)**
+
+```java
+import java.util.List;
+import simpledb.query.Constant; // 假设 Constant 类在 simpledb.query 包中
+
+public class InsertData {
+    private String tblname;       // 表名
+    private List<String> flds;    // 字段列表
+    private List<Constant> vals;  // 值列表
+
+    // 构造函数
+    public InsertData(String tblname, List<String> flds, List<Constant> vals) {
+        this.tblname = tblname;
+        this.flds = flds;
+        this.vals = vals;
+    }
+
+    // 获取表名
+    public String tableName() {
+        return tblname;
+    }
+
+    // 获取字段列表
+    public List<String> fields() {
+        return flds;
+    }
+
+    // 获取值列表
+    public List<Constant> vals() {
+        return vals;
+    }
+}
+```
+
+## 9.6.5 解析删除语句 (Parsing Deletions)
+
+删除语句由方法 **`delete`** 处理。该方法返回一个 **`DeleteData`** 类的对象；参见图 9.12。该类构造函数存储了指定删除语句中的**表名 (table name)** 和**谓词 (predicate)**，并提供了 `tableName` 和 `pred` 方法来访问它们。
+
+**图 9.12 SimpleDB `DeleteData` 类的代码 (The code for the SimpleDB class DeleteData)**
+
+```java
+import simpledb.query.Predicate; // 假设 Predicate 类在 simpledb.query 包中
+
+public class DeleteData {
+    private String tblname;     // 表名
+    private Predicate pred;     // 谓词
+
+    // 构造函数
+    public DeleteData(String tblname, Predicate pred) {
+        this.tblname = tblname;
+        this.pred = pred;
+    }
+
+    // 获取表名
+    public String tableName() {
+        return tblname;
+    }
+
+    // 获取谓词
+    public Predicate pred() {
+        return pred;
+    }
+}
+```
+
+## 9.6.6 解析修改语句 (Parsing Modifications)
+
+修改语句由方法 **`modify`** 处理。该方法返回一个 **`ModifyData`** 类的对象，如图 9.13 所示。这个类与 `DeleteData` 类非常相似。区别在于这个类还保存了**赋值信息 (assignment information)**：赋值左侧的**字段名 (fieldname)** 和赋值右侧的**表达式 (expression)**。附加的方法 `targetField` 和 `newValue` 返回这些信息。
+
+**图 9.13 SimpleDB `ModifyData` 类的代码 (The code for the SimpleDB class ModifyData)**
+
+```java
+import simpledb.query.Expression; // 假设 Expression 类在 simpledb.query 包中
+import simpledb.query.Predicate;   // 假设 Predicate 类在 simpledb.query 包中
+
+public class ModifyData {
+    private String tblname;       // 表名
+    private String fldname;       // 目标字段名 (被修改的字段)
+    private Expression newval;    // 新值表达式
+    private Predicate pred;       // 谓词
+
+    // 构造函数
+    public ModifyData(String tblname, String fldname, Expression newval, Predicate pred) {
+        this.tblname = tblname;
+        this.fldname = fldname;
+        this.newval = newval;
+        this.pred = pred;
+    }
+
+    // 获取表名
+    public String tableName() {
+        return tblname;
+    }
+
+    // 获取目标字段名
+    public String targetField() {
+        return fldname;
+    }
+
+    // 获取新值表达式
+    public Expression newValue() {
+        return newval;
+    }
+
+    // 获取谓词
+    public Predicate pred() {
+        return pred;
+    }
+}
+```
+
+## 9.6.7 解析表、视图和索引创建语句 (Parsing Table, View, and Index Creation)
+
+句法范畴 **`<Create>`** 指定了 SimpleDB 支持的三种 SQL 创建语句。表创建语句由句法范畴 **`<CreateTable>`** 及其方法 **`createTable`** 处理。`fieldDef` 和 `fieldType` 方法提取一个字段的信息并将其保存在自己的 **`Schema`** 对象中。`fieldDefs` 方法随后将此模式添加到表的模式中。表名和模式作为 **`CreateTableData`** 对象返回，其代码如 图 9.14 所示。
+**图 9.14 SimpleDB `CreateTableData` 类的代码 (The code for the SimpleDB class CreateTableData)**
+
+```java
+import simpledb.record.Schema; // 假设 Schema 类在 simpledb.record 包中
+
+public class CreateTableData {
+    private String tblname;     // 表名
+    private Schema sch;         // 表的模式 (schema)
+
+    // 构造函数
+    public CreateTableData(String tblname, Schema sch) {
+        this.tblname = tblname;
+        this.sch = sch;
+    }
+
+    // 获取表名
+    public String tableName() {
+        return tblname;
+    }
+
+    // 获取新表的模式
+    public Schema newSchema() {
+        return sch;
+    }
+}
+```
+
+视图创建语句由方法 **`createView`** 处理。该方法提取视图的**名称 (name)** 和**定义 (definition)**，并将其作为 **`CreateViewData`** 类型的对象返回；参见图 9.15。视图定义 (view definition) 的处理方式有些特殊。它需要被解析为 **`<Query>`**，以便检测格式错误的视图定义。然而，元数据管理器不希望保存定义的解析表示；它需要实际的查询字符串。因此，`CreateViewData` 构造函数通过对返回的 `QueryData` 对象调用 `toString` 来重新创建视图定义。实际上，`toString` 方法“反解析 (unparses)”了查询。
+**图 9.15 SimpleDB `CreateViewData` 类的代码 (The code for the SimpleDB class CreateViewData)**
+
+```java
+import simpledb.parse.QueryData; // 假设 QueryData 类在 simpledb.parse 包中
+
+public class CreateViewData {
+    private String viewname;    // 视图名
+    private QueryData qrydata;  // 视图底层查询的解析数据
+
+    // 构造函数
+    public CreateViewData(String viewname, QueryData qrydata) {
+        this.viewname = viewname;
+        this.qrydata = qrydata;
+    }
+
+    // 获取视图名
+    public String viewName() {
+        return viewname;
+    }
+
+    // 获取视图定义字符串 (通过 QueryData 的 toString 方法反解析得到)
+    public String viewDef() {
+        return qrydata.toString();
+    }
+}
+```
+**索引 (Index)** 是数据库系统用于提高查询效率的数据结构；索引是第 12 章的主题。`createIndex` 解析器方法提取**索引名 (index name)**、**表名 (table name)** 和**字段名 (field name)**，并将它们保存在 **`CreateIndexData`** 对象中；参见图 9.16。
+
+**图 9.16 SimpleDB `CreateIndexData` 类的代码 (The code for the SimpleDB class CreateIndexData)**
+
+```java
+public class CreateIndexData {
+    private String idxname, tblname, fldname; // 索引名, 表名, 字段名
+
+    // 构造函数
+    public CreateIndexData(String idxname, String tblname, String fldname) {
+        this.idxname = idxname;
+        this.tblname = tblname;
+        this.fldname = fldname;
+    }
+
+    // 获取索引名
+    public String indexName() {
+        return idxname;
+    }
+
+    // 获取表名
+    public String tableName() {
+        return tblname;
+    }
+
+    // 获取字段名
+    public String fieldName() {
+        return fldname;
+    }
+}
+```
