@@ -393,3 +393,74 @@ public class Lexer {
 项目列表在 SQL 中经常出现。例如，在查询中，`select` 子句包含逗号分隔的字段列表，`from` 子句包含逗号分隔的标识符列表，`where` 子句包含 `AND` 分隔的项列表。每个列表都使用您在 `<Predicate>` 中看到的相同递归技术在语法中指定。还要注意在 `<Query>`、`<Delete>` 和 `<Modify>` 的规则中如何使用“可选括号”表示法，以允许它们具有可选的 `where` 子句。
 
 我提到解析器不能强制执行类型兼容性，因为它无法知道它所看到标识符的类型。解析器也不能强制执行兼容的列表大小。例如，SQL `insert` 语句必须提及与字段名相同数量的值，但 `<Insert>` 的语法规则只要求字符串具有 `<FieldList>` 和 `<ConstList>`。**规划器 (planner)** 必须负责验证这些列表的大小相同（并且类型兼容）。
+
+好的，这是您提供的 SimpleDB 第 9 章关于“递归下降解析器”内容的翻译。
+
+## 9.5 递归下降解析器 (Recursive-Descent Parsers)
+
+解析树可以被认为是给定字符串在语法上合法的证明。但你如何确定解析树呢？数据库引擎如何判断一个字符串在语法上是否合法？
+
+编程语言研究人员为此目的开发了许多解析算法。解析算法的复杂性通常与它能支持的语法的复杂性成正比。幸运的是，我们的 SQL 语法**非常简单**，因此它可以使用最简单的解析算法，即**递归下降 (recursive descent)**。
+
+在基本的递归下降解析器中，每个**句法范畴 (syntactic category)** 都由一个 `void` 方法实现。调用此方法将“消费 (eat)”构成该范畴解析树的标记并返回。当标记不符合该范畴的解析树时，该方法会抛出异常。
+
+考虑图 9.7 中构成谓词子集的 SQL 语法的前五条规则。与此语法对应的 Java 类如 图 9.8 所示。
+
+**图 9.8 简化谓词递归下降解析器的代码 (The code for a simplified recursive-descent parser for predicates)**
+
+```java
+public class PredParser {
+    private Lexer lex; // 词法分析器实例
+
+    public PredParser(String s) {
+        lex = new Lexer(s); // 构造函数初始化词法分析器
+    }
+
+    // 实现 <Field> := IdTok
+    public void field() {
+        lex.eatId(); // 消费一个标识符标记
+    }
+
+    // 实现 <Constant> := StrTok | IntTok
+    public void constant() {
+        if (lex.matchStringConstant()) { // 如果当前标记是字符串常量
+            lex.eatStringConstant();     // 消费字符串常量
+        } else {                       // 否则 (期望是整数常量)
+            lex.eatIntConstant();        // 消费整数常量
+        }
+    }
+
+    // 实现 <Expression> := <Field> | <Constant>
+    public void expression() {
+        if (lex.matchId()) { // 如果当前标记是标识符 (可能是字段)
+            field();         // 尝试解析一个字段
+        } else {           // 否则 (期望是常量)
+            constant();      // 尝试解析一个常量
+        }
+    }
+
+    // 实现 <Term> := <Expression> = <Expression>
+    public void term() {
+        expression();        // 解析第一个表达式
+        lex.eatDelim('=');   // 消费等号分隔符
+        expression();        // 解析第二个表达式
+    }
+
+    // 实现 <Predicate> := <Term> [ AND <Predicate> ]
+    public void predicate() {
+        term(); // 解析第一个项
+        if (lex.matchKeyword("and")) { // 如果当前标记是关键字 "and"
+            lex.eatKeyword("and");     // 消费 "and" 关键字
+            predicate();               // 递归调用自身解析剩余的谓词
+        }
+    }
+}
+```
+
+考虑 `field` 方法，它对词法分析器进行了一次调用（并忽略任何返回值）。如果下一个标记是标识符，则调用成功返回并消费该标记。如果不是，则该方法将异常抛回给调用者。类似地，考虑 `term` 方法。它对 `expression` 的第一次调用消费了对应于单个 SQL 表达式的标记，它对 `eatDelim` 的调用消费了等号标记，它对 `expression` 的第二次调用消费了对应于另一个 SQL 表达式的标记。如果这些方法调用中的任何一个没有找到它期望的标记，它将抛出异常，`term` 方法将把异常传递给它的调用者。
+
+包含**备选项 (alternatives)** 的语法规则使用 `if` 语句实现。`if` 语句的条件会查看当前标记，以决定做什么。举一个简单的例子，考虑 `constant` 方法。如果当前标记是字符串常量，则该方法消费它；否则，该方法尝试消费整数常量。如果当前标记既不是字符串常量也不是整数常量，则对 `lex.eatIntConstant` 的调用将生成异常。举一个不那么简单的例子，考虑 `expression` 方法。在这里，该方法知道如果当前标记是标识符，那么它必须查找一个字段；否则它必须查找一个常量。
+
+`predicate` 方法演示了如何实现**递归规则 (recursive rule)**。它首先调用 `term` 方法，然后检查当前标记是否是关键字 `AND`。如果是，它会消费 `AND` 标记并递归调用自身。如果当前标记不是 `AND`，那么它知道它已经看到了列表中最后一个项并返回。因此，对 `predicate` 的调用将尽可能多地从标记流中消费标记——如果它看到一个 `AND` 标记，即使它已经看到了一个有效的谓词，它也会继续前进。
+
+递归下降解析的有趣之处在于，**方法调用的序列决定了输入字符串的解析树**。练习 9.4 要求你修改每个方法的代码以打印其名称，并适当缩进；结果将类似于一个横向的解析树。
