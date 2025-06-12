@@ -811,11 +811,11 @@ public class QueryData {
 }
 ```
 
-## 9.6.3 解析更新语句 (Parsing Updates)
+### 9.6.3 解析更新语句 (Parsing Updates)
 
 解析器方法 **`updateCmd`** 实现了句法范畴 **`<UpdateCmd>`**，它表示各种 SQL 更新语句的集合。在 JDBC 方法 `executeUpdate` 执行期间，会调用此方法来确定命令所表示的更新类型。该方法利用字符串的初始标记来识别命令，然后分派给特定命令的解析器方法。每个更新方法都有不同的返回类型，因为每个方法从其命令字符串中提取的信息不同；因此，`updateCmd` 方法返回一个 `Object` 类型的值。
 
-## 9.6.4 解析插入语句 (Parsing Insertions)
+### 9.6.4 解析插入语句 (Parsing Insertions)
 
 解析器方法 **`insert`** 实现了句法范畴 **`<Insert>`**。此方法提取三个项：**表名 (table name)**、**字段列表 (field list)** 和**值列表 (value list)**。图 9.11 所示的 **`InsertData`** 类保存这些值并使其可通过访问器方法获取。
 
@@ -854,7 +854,7 @@ public class InsertData {
 }
 ```
 
-## 9.6.5 解析删除语句 (Parsing Deletions)
+### 9.6.5 解析删除语句 (Parsing Deletions)
 
 删除语句由方法 **`delete`** 处理。该方法返回一个 **`DeleteData`** 类的对象；参见图 9.12。该类构造函数存储了指定删除语句中的**表名 (table name)** 和**谓词 (predicate)**，并提供了 `tableName` 和 `pred` 方法来访问它们。
 
@@ -885,7 +885,7 @@ public class DeleteData {
 }
 ```
 
-## 9.6.6 解析修改语句 (Parsing Modifications)
+### 9.6.6 解析修改语句 (Parsing Modifications)
 
 修改语句由方法 **`modify`** 处理。该方法返回一个 **`ModifyData`** 类的对象，如图 9.13 所示。这个类与 `DeleteData` 类非常相似。区别在于这个类还保存了**赋值信息 (assignment information)**：赋值左侧的**字段名 (fieldname)** 和赋值右侧的**表达式 (expression)**。附加的方法 `targetField` 和 `newValue` 返回这些信息。
 
@@ -931,7 +931,7 @@ public class ModifyData {
 }
 ```
 
-## 9.6.7 解析表、视图和索引创建语句 (Parsing Table, View, and Index Creation)
+### 9.6.7 解析表、视图和索引创建语句 (Parsing Table, View, and Index Creation)
 
 句法范畴 **`<Create>`** 指定了 SimpleDB 支持的三种 SQL 创建语句。表创建语句由句法范畴 **`<CreateTable>`** 及其方法 **`createTable`** 处理。`fieldDef` 和 `fieldType` 方法提取一个字段的信息并将其保存在自己的 **`Schema`** 对象中。`fieldDefs` 方法随后将此模式添加到表的模式中。表名和模式作为 **`CreateTableData`** 对象返回，其代码如 图 9.14 所示。
 **图 9.14 SimpleDB `CreateTableData` 类的代码 (The code for the SimpleDB class CreateTableData)**
@@ -988,6 +988,7 @@ public class CreateViewData {
     }
 }
 ```
+
 **索引 (Index)** 是数据库系统用于提高查询效率的数据结构；索引是第 12 章的主题。`createIndex` 解析器方法提取**索引名 (index name)**、**表名 (table name)** 和**字段名 (field name)**，并将它们保存在 **`CreateIndexData`** 对象中；参见图 9.16。
 
 **图 9.16 SimpleDB `CreateIndexData` 类的代码 (The code for the SimpleDB class CreateIndexData)**
@@ -1019,3 +1020,215 @@ public class CreateIndexData {
     }
 }
 ```
+
+## 9.7 章总结 (Chapter Summary)
+
+- **语言的语法**是一组规则，描述了可能构成有意义语句的字符串。
+
+- **解析器**负责确保其输入字符串在语法上是正确的。
+
+- **词法分析器**是解析器中负责将输入字符串分解成一系列**标记**的部分。
+
+- 每个标记都具有类型和值
+
+  。SimpleDB 词法分析器支持五种标记类型：
+
+  - **单字符分隔符**，例如逗号 `,`
+- **整数常量**，例如 `123`
+  - **字符串常量**，例如 `'joe'`
+- **关键字**，例如 `select`、`from` 和 `where`
+  - **标识符**，例如 `STUDENT`、`x` 和 `glop34a`
+
+- 每种标记类型都有两种方法：查询当前标记信息的方法，以及告诉词法分析器“消费”当前标记（返回其值并移动到下一个标记）的方法。
+
+- 语法
+
+  是一组规则，描述了标记如何合法地组合。
+
+  - 语法规则的左侧指定其**句法范畴**。句法范畴表示语言中的特定概念。
+  - 语法规则的右侧指定该范畴的内容，即满足规则的字符串集合。
+
+- **解析树**将其句法范畴作为其内部节点，将标记作为其叶节点。范畴节点的子节点对应于语法规则的应用。一个字符串属于某个句法范畴，当且仅当它有一个以该范畴为根的解析树。
+
+- **解析算法**从语法合法的字符串构造解析树。解析算法的复杂性通常与其能支持的语法的复杂性成正比。一种简单的解析算法被称为**递归下降**。
+
+- **递归下降解析器**为每个语法规则都有一个方法。每个方法调用对应于规则右侧项的方法。
+
+- 递归下降解析器中的每个方法都提取它读取的标记的值并返回它们。SQL 解析器应该从 SQL 语句中提取诸如表名、字段名、谓词和常量等信息。提取的内容取决于 SQL 语句的类型：
+
+  - **对于查询**：一个字段名集合（来自 `select` 子句）、一个表名集合（来自 `from` 子句）和一个谓词（来自 `where` 子句）。
+  - **对于插入**：一个表名、一个字段名列表和一个值列表。
+  - **对于删除**：一个表名和一个谓词。
+  - **对于修改**：一个表名、要修改的字段名、一个表示新字段值的表达式和一个谓词。
+  - **对于表创建**：一个表名及其模式。
+  - **对于视图创建**：一个表名及其定义。
+  - **对于索引创建**：一个索引名、一个表名和被索引字段的名称。
+
+## 9.8 建议阅读 (Suggested Reading)
+
+词法分析和解析领域受到了极大的关注，追溯到 60 多年前。Scott (2000) 的书对当前使用的各种算法提供了很好的介绍。网上有许多 SQL 解析器可供使用，例如 Zql (zql.sourceforge.net)。SQL 语法可以在 Date 和 Darwen (2004) 的附录中找到。SQL-92 标准（描述了 SQL 及其语法）的副本可在 [URL](www.contrib.andrew.cmu.edu/~shadow/sql/sql1992.txt) 获取。如果你从未看过标准文档，为了体验一下，你应该去看看。
+
+- Date, C., & Darwen, H. (2004). *SQL 标准指南* (A guide to the SQL standard) (第 4 版). Boston, MA: Addison Wesley.
+- Scott, M. (2000). *编程语言实用指南* (Programming language pragmatics). San Francisco, CA: Morgan Kaufman.
+
+## 9.9 练习 (Exercises)
+
+### 概念问题 (Conceptual Problems)
+
+9.1. 为以下 SQL 语句绘制解析树。
+
+(a) select a from x where b = 3
+
+(b) select a, b from x,y,z
+
+(c) delete from x where a = b and c = 0
+
+(d) update x set a = b where c = 3
+
+(e) insert into x (a,b,c) values (3, 'glop', 4)
+
+(f) create table x ( a varchar(3), b int, c varchar(2))
+
+9.2. 对于以下每个字符串，说明在解析时会在哪里以及为什么会生成异常。然后从 JDBC 客户端执行每个查询，看看会发生什么。
+
+(a) select from x
+
+(b) select x x from x
+
+(c) select x from y z
+
+(d) select a from where b=3
+
+(e) select a from y where b -=3
+
+(f) select a from y where
+
+9.3. 解析器方法 create 不符合图 9.7 的 SQL 语法。
+
+(a) 解释为什么`<Create>` 的语法规则对于递归下降解析来说过于模糊。
+
+(b) 修改语法，使其与 create 方法的实际工作方式相对应。
+
+### 编程问题 (Programming Problems)
+
+**9.4.** 修改每个对应于递归规则的解析器方法，使其使用 `while` 循环而不是递归。
+
+**9.5.** 修改 `PredParser` 类（来自图 9.8），以打印方法调用序列产生的解析树。
+
+9.6. 练习 8.8 要求你修改表达式以处理算术运算。
+
+(a) 类似地修改 SQL 语法。
+
+(b) 修改 SimpleDB 解析器以实现语法更改。
+
+(c) 编写一个 JDBC 客户端来测试服务器。例如，编写一个程序来执行一个 SQL 查询，将所有主修 30 的学生的毕业年份增加。
+
+9.7. 练习 8.9 要求你修改项。
+
+(a) 类似地修改 SQL 语法。
+
+(b) 修改 SimpleDB 解析器以实现语法更改。
+
+(c) 编写一个 JDBC 客户端来测试服务器。例如，编写一个程序来执行一个 SQL 查询，检索所有 2010 年之前毕业的学生的姓名。
+
+9.8. 练习 8.10 要求你修改谓词。
+
+(a) 类似地修改 SQL 语法。
+
+(b) 修改 SimpleDB 解析器以实现语法更改。
+
+(c) 编写一个 JDBC 客户端来测试服务器。例如，编写一个程序来执行一个 SQL 查询，检索所有主修 10 或 20 的学生的姓名。
+
+9.9. SimpleDB 也不允许在谓词中使用括号。
+
+(a) 适当地修改 SQL 语法（无论是否已完成练习 9.8）。
+
+(b) 修改 SimpleDB 解析器以实现语法更改。
+
+(c) 编写一个 JDBC 客户端来测试你的更改。
+
+9.10. 连接谓词可以在标准 SQL 中通过 from 子句中的 JOIN 关键字指定。例如，以下两个查询是等价的：
+
+select SName, DName from STUDENT, DEPT where MajorId = Did and GradYear = 2020
+
+select SName, DName from STUDENT join DEPT on MajorId = Did where GradYear = 2020
+
+(a) 修改 SQL 词法分析器以包含关键字 “join” 和 “on”。
+
+(b) 修改 SQL 语法以处理显式连接。
+
+(c) 修改 SimpleDB 解析器以实现你的语法更改。将连接谓词添加到从 where 子句获取的谓词中。
+
+(d) 编写一个 JDBC 程序来测试你的更改。
+
+9.11. 在标准 SQL 中，表可以具有关联的范围变量。来自该表的字段引用以该范围变量为前缀。例如，以下查询等效于练习 9.10 中的任一查询：
+
+select s.SName, d.DName from STUDENT s, DEPT d where s.MajorId = d.Did and s.GradYear = 2020
+
+(a) 修改 SimpleDB 语法以允许此功能。
+
+(b) 修改 SimpleDB 解析器以实现你的语法更改。你还必须修改解析器返回的信息。请注意，除非你也扩展了规划器，否则你将无法在 SimpleDB 服务器上测试你的更改；参见练习 10.13。
+
+9.12. 关键字 AS 可以在标准 SQL 中用于使用计算值扩展输出表。例如：
+
+select SName, GradYear-1 as JuniorYear from STUDENT
+
+(a) 修改 SimpleDB 语法，允许在 select 子句中的任何字段之后添加可选的 AS 表达式。
+
+(b) 修改 SimpleDB 词法分析器和解析器以实现你的语法更改。解析器应该如何使这些附加信息可用？请注意，除非你也扩展了规划器，否则你将无法在 SimpleDB 服务器上测试你的更改；参见练习 10.14。
+
+9.13. 关键字 UNION 可以在标准 SQL 中用于组合两个查询的输出表。例如：
+
+select SName from STUDENT where MajorId = 10 union select SName from STUDENT where MajorId = 20
+
+(a) 修改 SimpleDB 语法，允许一个查询是另外两个查询的并集。
+
+(b) 修改 SimpleDB 词法分析器和解析器以实现你的语法更改。请注意，除非你也扩展了规划器，否则你将无法在 SimpleDB 服务器上测试你的更改；参见练习 10.15。
+
+9.14. 标准 SQL 支持 where 子句中的嵌套查询。例如：
+
+select SName from STUDENT where MajorId in select Did from DEPT where DName = 'math'
+
+(a) 修改 SimpleDB 语法，允许一个项的形式为“fieldname op query”，其中 op 是 “in” 或 “not in”。
+
+(b) 修改 SimpleDB 词法分析器和解析器以实现你的语法更改。请注意，除非你也扩展了规划器，否则你将无法在 SimpleDB 服务器上测试你的更改；参见练习 10.16。
+
+9.15. 在标准 SQL 中，select 子句可以使用字符 *来表示表的所有字段。如果 SQL 支持范围变量（如练习 9.11），那么* 同样可以以范围变量为前缀。
+
+(a) 修改 SimpleDB 语法，允许 * 出现在查询中。
+
+(b) 修改 SimpleDB 解析器以实现你的语法更改。请注意，除非你也扩展了规划器，否则你将无法在 SimpleDB 服务器上测试你的更改；参见练习 10.17。
+
+9.16. 在标准 SQL 中，可以通过以下 insert 语句的变体将记录插入到表中：
+
+insert into MATHSTUDENT(SId, SName) select SId, SName from STUDENT, DEPT where MajorId = DId and DName = 'math'
+
+也就是说，select 语句返回的记录被插入到指定的表中。（上述语句假设 MATHSTUDENT 空表已创建。）
+
+(a) 修改 SimpleDB SQL 语法以处理这种形式的插入。
+
+(b) 修改 SimpleDB 解析器代码以实现你的语法。请注意，除非你也修改了规划器，否则你将无法运行 JDBC 查询；参见练习 10.18。
+
+9.17. 练习 8.7 要求你创建新类型的常量。
+
+(a) 修改 SimpleDB SQL 语法，允许在 create table 语句中使用这些类型。
+
+(b) 你是否需要引入新的常量字面量？如果是，修改 `<Constant>` 句法范畴。
+
+(c) 修改 SimpleDB 解析器代码以实现你的语法。
+
+9.18. 练习 8.11 要求你实现空值。本练习要求你修改 SQL 以理解空值。
+
+(a) 修改 SimpleDB 语法以接受关键字 null 作为常量。
+
+(b) 修改 SimpleDB 解析器以实现第 (a) 部分的语法更改。
+
+(c) 在标准 SQL 中，一个项可以是 GradYear is null 的形式，如果表达式 GradYear 为空值，则返回 true。关键字 is null 被视为具有一个参数的单个操作符。修改 SimpleDB 语法以具有此新操作符。
+
+(d) 修改 SimpleDB 解析器和 Term 类以实现第 (c) 部分的语法更改。
+
+(e) 编写一个 JDBC 程序来测试你的代码。你的程序可以将值设置为 null（或使用新插入记录的未赋值值），然后执行涉及 is null 的查询。请注意，除非你修改 SimpleDB 的 JDBC 实现，否则你的程序将无法打印空值；参见练习 11.6。
+
+**9.19.** 开源软件包 javacc (参见 URL javacc.github.io/javacc) 根据语法规范构建解析器。使用 javacc 为 SimpleDB 语法创建一个解析器。然后用你的新解析器替换现有的解析器。
+
+**9.20.** `Parser` 类包含一个对应于语法中每个句法范畴的方法。我们简化的 SQL 语法很小，因此该类易于管理。然而，一个功能齐全的语法将使该类显著增大。另一种实现策略是将每个句法范畴放在其自己的类中。类的构造函数将执行该范畴的解析。该类还将具有返回从解析标记中提取的值的方法。这种策略会创建大量类，每个类都相对较小。使用这种策略重写 SimpleDB 解析器。
