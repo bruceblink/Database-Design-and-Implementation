@@ -266,7 +266,7 @@ npm run start
 - [x] 第6章： 记录管理（Record Management）
 - [x] 第7章： 元数据管理（Metadata Management）
 - [x] 第8章： 查询处理（Query Processing）
-- [ ] 第9章： 解析（Parsing）
+- [x] 第9章： 解析（Parsing）
 - [ ] 第10章： 查询规划（Planning）
 - [ ] 第11章：  JDBC 接口（JDBC Interfaces）
 - [ ] 第12章： 索引（Indexing）
@@ -306,7 +306,7 @@ npm run start
 
 ![部署状态](https://img.shields.io/github/deployments/BruceBlink/database-design-and-implementation/Production?label=vercel&logo=vercel)
 ![最近更新](https://img.shields.io/github/last-commit/BruceBlink/database-design-and-implementation?label=最近更新)
-![翻译进度](https://img.shields.io/badge/翻译进度-53%25-green)
+![翻译进度](https://img.shields.io/badge/翻译进度-59%25-green)
 ![维护状态](https://img.shields.io/badge/维护状态-积极维护-brightgreen)
 ![许可证](https://img.shields.io/badge/许可证-MIT-blue)
 
