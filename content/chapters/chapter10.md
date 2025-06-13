@@ -1,0 +1,4 @@
+---
+typora-root-url: ./..\..\public
+---
+
