@@ -23,7 +23,6 @@ typora-root-url: ./..\..\public
 
 SimpleDB 规划器可以通过元数据管理器的 `getLayout` 方法获取必要的表模式。然而，规划器目前不执行任何显式验证。练习 10.4-10.8 要求您纠正这种情况。
 
-
 ## 10.2 评估查询树的成本 (The Cost of Evaluating a Query Tree)
 
 规划器的第二个职责是为查询构建一个**关系代数查询树 (relational algebra query tree)**。一个复杂之处在于，一个 SQL 查询可以通过几种不同的查询树来实现，每个查询树都有自己的执行时间。规划器负责选择最有效的一个。
@@ -36,8 +35,6 @@ SimpleDB 规划器可以通过元数据管理器的 `getLayout` 方法获取必�
 
 ![image-20250613101553638](/images/chapter10/fig10-1.png)
 
-
-
 - B(s) = 构建扫描 s 的输出所需的块访问次数。
 - R(s) = 扫描 s 输出中的记录数。
 - V(s,F) = 扫描 s 输出中不同 F 值的数量。
@@ -48,11 +45,9 @@ SimpleDB 规划器可以通过元数据管理器的 `getLayout` 方法获取必�
 
 以下小节将推导图 10.1 所示的成本函数，并举例说明如何使用它们来计算查询树的成本。
 
-
 ### 10.2.1 表扫描的成本 (The Cost of a Table Scan)
 
 查询中的每个**表扫描 (table scan)** 都持有其当前的记录页，该记录页持有一个缓冲区，该缓冲区锁定一个页面。当该页面中的记录已被读取时，其缓冲区被解除锁定，并且文件中下一个块的记录页取代它的位置。因此，一次通过表扫描将精确地访问每个块一次，每次锁定一个缓冲区。因此，当 s 是一个表扫描时，B(s)、R(s) 和 V(s,F) 的值就是底层表中**块数 (number of blocks)**、**记录数 (number of records)** 和**不同值的数量 (number of distinct values)**。
-
 
 ### 10.2.2 选择扫描的成本 (The Cost of a Select Scan)
 
@@ -86,7 +81,6 @@ V(s,F)=min{V(s1,A),V(s1,B)} 对于 F=A 或 B
 
 V(s,F)=V(s1,F) 对于所有除了 A 或 B 之外的字段 F
 
-
 ### 10.2.3 投影扫描的成本 (The Cost of a Project Scan)
 
 与选择扫描一样，投影扫描 (project scan) 只有一个底层扫描（称为 s1），并且除了其底层扫描所需的块访问之外，不需要额外的块访问。此外，投影操作不改变记录数，也不改变任何记录的值。因此：
@@ -96,7 +90,6 @@ B(s)=B(s1)
 R(s)=R(s1)
 
 V(s,F)=V(s1,F) 对于所有字段 F
-
 
 ### 10.2.4 乘积扫描的成本 (The Cost of a Product Scan)
 
