@@ -129,7 +129,7 @@ database-design-and-implementation/
    - 8.8 建议阅读（Suggested Reading）
    - 8.9 习题（Exercises）
 
-9. ###   解析（Parsing）
+9. ###   [解析（Parsing）](content/chapters/chapter9.md#第-9-章-解析-parsing)
 
    - 9.1 语法与语义（Syntax Versus Semantics）
    - 9.2 词法分析（Lexical Analysis）
@@ -141,7 +141,7 @@ database-design-and-implementation/
    - 9.8 建议阅读（Suggested Reading）
    - 9.9 习题（Exercises）
 
-10. ###   查询规划（Planning）
+10. ###   [查询规划（Planning）](content/chapters/chapter10.md#第-10-章-规划-planning)
 
     - 10.1 验证（Verification）
     - 10.2 查询树评估成本（The Cost of Evaluating a Query Tree）
