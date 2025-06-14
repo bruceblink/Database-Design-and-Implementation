@@ -256,6 +256,10 @@ npm run start
 - 在 `content/references/bibliography.md` 中查找相关参考资料
 - 参考 `LICENSE` 了解使用条款
 
+### 6. 配套源码
+
+[SimpleDB](https://github.com/BruceBlink/simpledb)
+
 ## 翻译进度
 
 - [x] 第1章：数据库系统（Database Systems）
