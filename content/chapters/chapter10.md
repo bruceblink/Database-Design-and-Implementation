@@ -183,3 +183,257 @@ Scan s6 = new ProjectScan(s5, fields);
 `s4 = new ProductScan(s3, STUDENT)`
 
 练习 10.3 要求你证明在这种情况下，操作仅需要 4502 次块访问。这种差异主要归因于现在只计算了一次选择操作。
+
+## 10.3 计划 (Plans)
+
+SimpleDB 中计算查询树成本的对象被称为**计划 (plan)**。计划实现了 `Plan` 接口，其代码如 图 10.4 所示。
+
+该接口支持 `blocksAccessed`、`recordsOutput` 和 `distinctValues` 方法，这些方法用于计算查询的 B(s)、R(s) 和 V(s,F) 值。`schema` 方法返回输出表的模式。查询规划器可以使用此模式来验证类型正确性并寻找优化计划的方法。最后，每个计划都有 `open` 方法，它创建其对应的扫描。
+
+计划和扫描在概念上是相似的，因为它们都表示一个查询树。区别在于，**计划访问查询中表的元数据，而扫描访问它们的数据**。当你提交一个 SQL 查询时，数据库规划器可能会为该查询创建多个计划，并使用它们的元数据来选择最有效的一个。然后，它使用该计划的 `open` 方法来创建所需的扫描。
+
+计划的构建方式与扫描类似。每个关系代数操作符都有一个 `Plan` 类，外加用于处理存储表的 `TablePlan` 类。例如，图 10.5 的代码检索了主修数学的学生的姓名，与图 10.2 中的查询相同。唯一的区别是图 10.5 使用计划构建查询树，并将最终计划转换为扫描。
+
+**图 10.4 SimpleDB `Plan` 接口 (The SimpleDB Plan interface)**
+
+```java
+import simpledb.record.Schema; // 假设 Schema 类在 simpledb.record 包中
+import simpledb.query.Scan;   // 假设 Scan 接口在 simpledb.query 包中
+
+public interface Plan {
+    // 创建并返回与此计划对应的 Scan 对象
+    public Scan open();
+
+    // 返回执行此计划所需的块访问次数 (B(s))
+    public int blocksAccessed();
+
+    // 返回此计划输出的记录数 (R(s))
+    public int recordsOutput();
+
+    // 返回此计划输出中指定字段的不同值的数量 (V(s, F))
+    public int distinctValues(String fldname);
+
+    // 返回此计划输出的表的模式
+    public Schema schema();
+}
+```
+
+**图 10.5 使用计划创建查询 (Using plans to create a query)**
+
+```java
+import simpledb.server.SimpleDB; // 假设 SimpleDB 类在 simpledb.server 包中
+import simpledb.tx.Transaction; // 假设 Transaction 类在 simpledb.tx 包中
+import simpledb.metadata.MetadataMgr; // 假设 MetadataMgr 类在 simpledb.metadata 包中
+import simpledb.plan.*; // 假设 Plan 相关的类 (TablePlan, SelectPlan, ProductPlan, ProjectPlan) 在 simpledb.plan 包中
+import simpledb.query.Predicate; // 假设 Predicate 类在 simpledb.query 包中
+import simpledb.query.Scan; // 假设 Scan 接口在 simpledb.query 包中
+import java.util.Arrays;
+import java.util.List;
+
+// 初始化 SimpleDB 数据库实例
+SimpleDB db = new SimpleDB("studentdb");
+// 获取元数据管理器
+MetadataMgr mdm = db.mdMgr();
+// 开启一个新事务
+Transaction tx = db.newTx();
+
+// p1: 创建 STUDENT 表的计划
+Plan p1 = new TablePlan(tx, "student", mdm);
+
+// p2: 创建 DEPT 表的计划
+Plan p2 = new TablePlan(tx, "dept", mdm);
+
+// pred1: 谓词，例如 DName='math' (具体实现需要根据 Predicate 类的构造函数)
+Predicate pred1 = new Predicate(/* ... */); // 例如：new Term(new Expression("dname"), new Expression(new Constant("math")))
+
+// p3: 对 p2 (DEPT 表) 的选择计划，过滤 DName='math'
+Plan p3 = new SelectPlan(p2, pred1);
+
+// p4: p1 (STUDENT) 和 p3 (选择后的 DEPT) 的乘积计划
+Plan p4 = new ProductPlan(p1, p3);
+
+// pred2: 谓词，例如 majorid=did (具体实现需要根据 Predicate 类的构造函数)
+Predicate pred2 = new Predicate(/* ... */); // 例如：new Term(new Expression("majorid"), new Expression("did"))
+
+// p5: 对 p4 (乘积结果) 的选择计划，过滤 majorid=did
+Plan p5 = new SelectPlan(p4, pred2);
+
+// fields: 要投影的字段列表，例如 "sname"
+List<String> fields = Arrays.asList("sname");
+
+// p6: 对 p5 (选择后的乘积结果) 的投影计划
+Plan p6 = new ProjectPlan(p5, fields);
+
+// 使用最终计划 p6 创建对应的 Scan 对象
+Scan s = p6.open();
+```
+
+图 10.6、10.7、10.8、10.9 和 10.10 给出了 `TablePlan`、`SelectPlan`、`ProjectPlan` 和 `ProductPlan` 类的代码。`TablePlan` 类直接从元数据管理器获取其成本估算。其他类使用上一节的公式计算它们的估算值。
+
+选择计划的成本估算比其他操作符更复杂，因为估算值取决于谓词。因此，谓词具有 `reductionFactor` 和 `equatesWithConstant` 方法供选择计划使用。`reductionFactor` 方法被 `recordsAccessed` 使用，以计算谓词减少输入表大小的程度。`equatesWithConstant` 方法被 `distinctValues` 使用，以确定谓词是否将指定字段与常量等同。
+
+`ProjectPlan` 和 `ProductPlan` 的构造函数从其底层计划的模式创建它们的模式。`ProjectPlan` 模式是通过查找底层字段列表的每个字段并将该信息添加到新模式中来创建的。`ProductPlan` 模式是底层模式的并集。
+
+这些计划类中每个 `open` 方法都很直接。通常，从计划构建扫描有两个步骤：首先，该方法递归地为每个底层计划构建一个扫描。其次，它将这些扫描传递给操作符的 `Scan` 构造函数。
+
+**图 10.6 SimpleDB `TablePlan` 类的代码 (The code for the SimpleDB class TablePlan)**
+
+```java
+import simpledb.query.Scan;
+import simpledb.query.TableScan; // 假设 TableScan 类在 simpledb.query 包中
+import simpledb.record.Layout;   // 假设 Layout 类在 simpledb.record 包中
+import simpledb.record.Schema;   // 假设 Schema 类在 simpledb.record 包中
+import simpledb.tx.Transaction; // 假设 Transaction 类在 simpledb.tx 包中
+import simpledb.metadata.MetadataMgr; // 假设 MetadataMgr 类在 simpledb.metadata 包中
+import simpledb.stats.StatInfo; // 假设 StatInfo 类在 simpledb.stats 包中
+
+public class TablePlan implements Plan {
+    private Transaction tx;
+    private String tblname;
+    private Layout layout; // 表的布局
+    private StatInfo si;   // 表的统计信息
+
+    // 构造函数
+    public TablePlan(Transaction tx, String tblname, MetadataMgr md) {
+        this.tx = tx;
+        this.tblname = tblname;
+        // 从元数据管理器获取表的布局
+        layout = md.getLayout(tblname, tx);
+        // 从元数据管理器获取表的统计信息
+        si = md.getStatInfo(tblname, layout, tx);
+    }
+
+    // 创建并返回一个 TableScan 对象
+    public Scan open() {
+        return new TableScan(tx, tblname, layout);
+    }
+
+    // 返回表访问的块数 (从统计信息获取)
+    public int blocksAccessed() {
+        return si.blocksAccessed();
+    }
+
+    // 返回表中的记录数 (从统计信息获取)
+    public int recordsOutput() {
+        return si.recordsOutput();
+    }
+
+    // 返回指定字段的不同值数量 (从统计信息获取)
+    public int distinctValues(String fldname) {
+        return si.distinctValues(fldname);
+    }
+
+    // 返回表的模式 (从布局获取)
+    public Schema schema() {
+        return layout.schema();
+    }
+}
+```
+
+**图 10.7 SimpleDB `SelectPlan` 类的代码 (The code for the SimpleDB class SelectPlan)**
+
+```java
+import simpledb.query.Predicate; // 假设 Predicate 类在 simpledb.query 包中
+import simpledb.query.Scan;     // 假设 Scan 接口在 simpledb.query 包中
+import simpledb.query.SelectScan; // 假设 SelectScan 类在 simpledb.query 包中
+import simpledb.record.Schema; // 假设 Schema 类在 simpledb.record 包中
+
+public class SelectPlan implements Plan {
+    private Plan p;         // 底层计划
+    private Predicate pred; // 选择谓词
+
+    // 构造函数
+    public SelectPlan(Plan p, Predicate pred) {
+        this.p = p;
+        this.pred = pred;
+    }
+
+    // 创建并返回一个 SelectScan 对象，底层扫描通过 p.open() 获取
+    public Scan open() {
+        Scan s = p.open();
+        return new SelectScan(s, pred);
+    }
+
+    // 返回块访问数 (与底层计划相同)
+    public int blocksAccessed() {
+        return p.blocksAccessed();
+    }
+
+    // 返回记录数 (底层计划记录数 / 谓词的归约因子)
+    public int recordsOutput() {
+        return p.recordsOutput() / pred.reductionFactor(p);
+    }
+
+    // 返回指定字段的不同值数量
+    public int distinctValues(String fldname) {
+        // 如果谓词将字段与常量等同，则不同值为 1
+        if (pred.equatesWithConstant(fldname) != null) {
+            return 1;
+        } else {
+            // 如果谓词将字段与另一个字段等同
+            String fldname2 = pred.equatesWithField(fldname);
+            if (fldname2 != null) {
+                // 不同值为两个字段不同值数量的最小值
+                return Math.min(p.distinctValues(fldname), p.distinctValues(fldname2));
+            } else {
+                // 否则，不同值数量与底层计划相同
+                return p.distinctValues(fldname);
+            }
+        }
+    }
+
+    // 返回模式 (与底层计划相同)
+    public Schema schema() {
+        return p.schema();
+    }
+}
+```
+
+**图 10.8 SimpleDB `ProjectPlan` 类的代码 (The code for the SimpleDB class ProjectPlan)**
+
+```java
+import simpledb.query.ProjectScan; // 假设 ProjectScan 类在 simpledb.query 包中
+import simpledb.query.Scan;      // 假设 Scan 接口在 simpledb.query 包中
+import simpledb.record.Schema;   // 假设 Schema 类在 simpledb.record 包中
+import java.util.List;
+
+public class ProjectPlan implements Plan {
+    private Plan p;      // 底层计划
+    private Schema schema = new Schema(); // 投影后的模式
+
+    // 构造函数
+    public ProjectPlan(Plan p, List<String> fieldlist) {
+        this.p = p;
+        // 根据字段列表和底层计划的模式构建新的模式
+        for (String fldname : fieldlist) {
+            schema.add(fldname, p.schema());
+        }
+    }
+
+    // 创建并返回一个 ProjectScan 对象
+    public Scan open() {
+        Scan s = p.open();
+        return new ProjectScan(s, schema.fields()); // ProjectScan 需要的是字段名列表
+    }
+
+    // 返回块访问数 (与底层计划相同)
+    public int blocksAccessed() {
+        return p.blocksAccessed();
+    }
+
+    // 返回记录数 (与底层计划相同)
+    public int recordsOutput() {
+        return p.recordsOutput();
+    }
+
+    // 返回指定字段的不同值数量 (与底层计划相同)
+    public int distinctValues(String fldname) {
+        return p.distinctValues(fldname);
+    }
+
+    // 返回投影后的模式
+    public Schema schema() {
+        return schema;
+    }
+}
+```
