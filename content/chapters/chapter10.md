@@ -437,3 +437,200 @@ public class ProjectPlan implements Plan {
     }
 }
 ```
+
+## 10.4 查询计划 (Query Planning)
+
+我们回顾一下，**解析器**将 SQL 查询字符串作为输入，并返回一个 **`QueryData`** 对象作为输出。本节将探讨如何从这个 `QueryData` 对象构建一个**计划**。
+
+### 10.4.1 SimpleDB 查询规划算法 (The SimpleDB Query Planning Algorithm)
+
+SimpleDB 支持一个简化的 SQL 子集，它不包含计算、排序、分组、嵌套和重命名等复杂操作。因此，其所有 SQL 查询都可以通过仅使用**选择 (select)**、**投影 (project)** 和**乘积 (product)** 这三个操作符的查询树来实现。创建此类计划的算法如 图 10.10 所示。
+
+**图 10.9 SimpleDB `ProductPlan` 类的代码 (The code for the SimpleDB class ProductPlan)**
+
+```java
+import simpledb.query.ProductScan;
+import simpledb.query.Scan;
+import simpledb.record.Schema;
+
+public class ProductPlan implements Plan {
+    private Plan p1, p2; // 两个底层计划
+    private Schema schema = new Schema(); // 乘积后的模式
+
+    // 构造函数：初始化两个底层计划，并合并它们的模式
+    public ProductPlan(Plan p1, Plan p2) {
+        this.p1 = p1;
+        this.p2 = p2;
+        schema.addAll(p1.schema());
+        schema.addAll(p2.schema());
+    }
+
+    // open 方法：打开底层计划的扫描，然后返回一个 ProductScan
+    public Scan open() {
+        Scan s1 = p1.open();
+        Scan s2 = p2.open();
+        return new ProductScan(s1, s2);
+    }
+
+    // blocksAccessed 方法：计算乘积操作的块访问成本
+    public int blocksAccessed() {
+        return p1.blocksAccessed()
+                + (p1.recordsOutput() * p2.blocksAccessed());
+    }
+
+    // recordsOutput 方法：计算乘积操作的记录输出数
+    public int recordsOutput() {
+        return p1.recordsOutput() * p2.recordsOutput();
+    }
+
+    // distinctValues 方法：返回指定字段的不同值数量（取决于字段属于哪个底层计划）
+    public int distinctValues(String fldname) {
+        if (p1.schema().hasField(fldname))
+            return p1.distinctValues(fldname);
+        else
+            return p2.distinctValues(fldname);
+    }
+
+    // schema 方法：返回乘积操作的模式
+    public Schema schema() {
+        return schema;
+    }
+}
+```
+
+**图 10.10 SimpleDB SQL 子集的基本查询规划算法 (The basic query planning algorithm for the SimpleDB subset of SQL)**
+
+1. **为 `from` 子句中的每个表 `T` 构建一个计划。** a) 如果 `T` 是一个存储表，那么该计划就是 `T` 的一个表计划。 b) 如果 `T` 是一个视图，那么该计划是**递归调用此算法**来处理 `T` 定义的结果。
+2. **按照给定顺序，对这些表计划进行乘积操作。**
+3. **根据 `where` 子句中的谓词进行选择操作。**
+4. **根据 `select` 子句中的字段进行投影操作。**
+
+作为此查询规划算法的一个示例，考虑图 10.11。图 (a) 给出了一个 SQL 查询，它检索获得“A”成绩的爱因斯坦教授的学生姓名。图 (b) 是该算法生成的查询树。
+
+**图 10.11 将基本查询规划算法应用于 SQL 查询 (Example of the Query Planning Algorithm)**
+
+![fig10-11](/images/chapter10/fig10-11.png)
+
+**(a) SQL 查询 (SQL Query):**
+
+```sql
+SELECT SName
+FROM STUDENT, ENROLL, COURSE, SECTION
+WHERE SId = StudId AND SectId = SectionId AND CourseId = CId AND Prof = 'Einstein' AND Grade = 'A'
+```
+
+图 10.12 说明了使用视图的等效查询的查询规划算法。图 (a) 给出了视图定义和查询，图 (b) 描绘了视图的查询树，图 (c) 描绘了整个查询的查询树。
+
+ **图 10.12 在存在视图的情况下应用基本查询规划算法 .(a) SQL 查询，(b) 视图的树，(c) 整个查询的树**
+
+**(a) 视图定义和查询 (View Definition and Query):**
+
+```sql
+-- 视图定义
+CREATE VIEW MathStudents AS
+SELECT SName, MajorId, GradYear FROM STUDENT WHERE MajorId = 30;
+
+-- 使用视图的查询
+SELECT SName FROM MathStudents WHERE GradYear < 2025;
+```
+
+![fig10-12](/images/chapter10/fig10-12.png)
+
+要了解这种查询规划算法的示例，请考虑图 10.11。**图 (a)** 给出了一个 SQL 查询，它检索获得爱因斯坦教授“A”成绩的学生的姓名。**图 (b)** 是该算法生成的查询树。
+
+图 10.12 说明了使用视图的等效查询的查询规划算法。**图 (a)** 给出了视图定义和查询，**图 (b)** 描绘了视图的查询树，**图 (c)** 描绘了整个查询的树。
+
+请注意，最终的树由两个表的乘积和视图树组成，然后是选择和投影。这个最终的树与图 10.11b 的树是等效的，但又有些不同。特别是，原始选择谓词的一部分已被“下推”到树的下方，并且存在一个中间投影。第 15 章的查询优化技术利用了这种等价性。
+
+### 10.4.2 实现查询规划算法 (Implementing the Query Planning Algorithm)
+
+SimpleDB 的 **`BasicQueryPlanner`** 类实现了基本的查询规划算法；其代码如 图 10.13 所示。代码中的四个步骤实现了该算法中对应的步骤。
+
+**图 10.13 SimpleDB `BasicQueryPlanner` 类的代码 (The code for the SimpleDB class BasicQueryPlanner)**
+
+```java
+import simpledb.tx.Transaction;
+import simpledb.metadata.MetadataMgr;
+import simpledb.parse.Parser;
+import simpledb.parse.QueryData;
+import java.util.ArrayList;
+import java.util.List;
+
+public class BasicQueryPlanner implements QueryPlanner { // 假设 QueryPlanner 是一个接口
+    private MetadataMgr mdm;
+
+    public BasicQueryPlanner(MetadataMgr mdm) {
+        this.mdm = mdm;
+    }
+
+    public Plan createPlan(QueryData data, Transaction tx) {
+        // 步骤 1: 为每个提及的表或视图创建计划。
+        List<Plan> plans = new ArrayList<Plan>();
+        for (String tblname : data.tables()) {
+            String viewdef = mdm.getViewDef(tblname, tx);
+            if (viewdef != null) { // 如果是视图，则递归规划视图
+                Parser parser = new Parser(viewdef);
+                QueryData viewdata = parser.query();
+                plans.add(createPlan(viewdata, tx));
+            } else { // 否则，创建表计划
+                plans.add(new TablePlan(tx, tblname, mdm));
+            }
+        }
+
+        // 步骤 2: 创建所有表计划的乘积
+        Plan p = plans.remove(0); // 取出第一个计划作为初始计划
+        for (Plan nextplan : plans) // 将剩余的计划逐个与当前计划进行乘积操作
+            p = new ProductPlan(p, nextplan);
+
+        // 步骤 3: 添加一个谓词的选择计划
+        p = new SelectPlan(p, data.pred());
+
+        // 步骤 4: 对字段名称进行投影
+        return new ProjectPlan(p, data.fields());
+    }
+}
+```
+
+基本的查询规划算法是**僵化且幼稚**的。它按照 `QueryData.tables` 方法返回的顺序生成乘积计划。请注意，这个顺序是完全任意的——任何其他表的顺序都会产生等效的扫描。因此，该算法的性能将是不稳定的（而且通常很差），因为它没有使用计划元数据来帮助确定乘积计划的顺序。
+
+图 10.14 展示了规划算法的一个小改进。它仍然以相同的顺序考虑表，但现在为每个表创建两个乘积计划——一个作为乘积的左侧，一个作为右侧——并保留成本最小的计划。
+
+**图 10.14 SimpleDB `BetterQueryPlanner` 类的代码 (The code for the SimpleDB class BetterQueryPlanner)**
+
+```java
+public class BetterQueryPlanner implements QueryPlanner {
+    // ... 其他方法和字段（与 BasicQueryPlanner 相似）
+
+    public Plan createPlan(QueryData data, Transaction tx) {
+        // ... (步骤 1 与 BasicQueryPlanner 相同)
+        List<Plan> plans = new ArrayList<Plan>();
+        for (String tblname : data.tables()) {
+            String viewdef = mdm.getViewDef(tblname, tx);
+            if (viewdef != null) {
+                Parser parser = new Parser(viewdef);
+                QueryData viewdata = parser.query();
+                plans.add(createPlan(viewdata, tx));
+            } else {
+                plans.add(new TablePlan(tx, tblname, mdm));
+            }
+        }
+
+        // 步骤 2: 创建所有表计划的乘积
+        // 在每一步，选择成本最小的计划
+        Plan p = plans.remove(0); // 初始化为第一个计划
+        for (Plan nextplan : plans) {
+            // 尝试两种乘积顺序：(nextplan * p) 和 (p * nextplan)
+            Plan p1 = new ProductPlan(nextplan, p);
+            Plan p2 = new ProductPlan(p, nextplan);
+
+            // 选择块访问次数较少的那个
+            p = (p1.blocksAccessed() < p2.blocksAccessed() ? p1 : p2);
+        }
+        // ... (步骤 3 和 4 与 BasicQueryPlanner 相同)
+        p = new SelectPlan(p, data.pred());
+        return new ProjectPlan(p, data.fields());
+    }
+}
+```
+
+这个算法比基本的规划算法更好，但它仍然过于依赖查询中表的顺序。商业数据库系统中的规划算法要复杂得多。它们不仅分析许多等效计划的成本；它们还在特殊情况下实现可以应用的附加关系操作。它们的目标是选择最有效的计划（从而比竞争对手更具吸引力）。这些技术是第 12、13、14 和 15 章的主题。
