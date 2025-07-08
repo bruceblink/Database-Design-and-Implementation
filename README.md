@@ -271,7 +271,7 @@ npm run start
 - [x] 第7章： 元数据管理（Metadata Management）
 - [x] 第8章： 查询处理（Query Processing）
 - [x] 第9章： 解析（Parsing）
-- [x] 第10章： 查询规划（Planning）
+- [ ] 第10章： 查询计划（Planning）
 - [x] 第11章：  JDBC 接口（JDBC Interfaces）
 - [ ] 第12章： 索引（Indexing）
 - [ ] 第13章：物化与排序（Materialization and Sorting）
