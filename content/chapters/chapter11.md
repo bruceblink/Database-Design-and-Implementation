@@ -412,3 +412,134 @@ public class EmbeddedMetaData extends ResultSetMetaDataAdapter { // 继承自 Re
     }
 }
 ```
+
+This section covers how SimpleDB implements a server-based JDBC interface using Java's Remote Method Invocation (RMI).
+
+### 11.3 远程方法调用 (Remote Method Invocation)
+
+本章的其余部分讨论如何实现**基于服务器的 JDBC 接口**。实现基于服务器的 JDBC 最困难的部分是编写服务器端代码。幸运的是，Java 库中包含的类可以完成大部分工作；这些类被称为**远程方法调用 (Remote Method Invocation，简称 RMI)**。本节将介绍 RMI。下一节将展示如何使用 RMI 来编写基于服务器的 JDBC 接口。
+
+
+### 11.3.1 远程接口 (Remote Interfaces)
+
+**RMI** 使得一台机器（**客户端**）上的 Java 程序能够与另一台机器（**服务器**）上的对象进行交互。要使用 RMI，您必须定义一个或多个扩展 Java `Remote` 接口的接口；这些接口被称为其**远程接口 (remote interfaces)**。您还需要为每个接口编写一个实现类；这些类将驻留在服务器上，被称为**远程实现类 (remote implementation classes)**。RMI 将自动创建相应的实现类，这些类驻留在客户端；这些类被称为**存根类 (stub classes)**。当客户端从存根对象调用方法时，方法调用会通过网络发送到服务器，并由相应的远程实现对象在服务器上执行；然后结果会返回到客户端的存根对象。简而言之，远程方法由客户端（使用存根对象）调用，但在服务器上（使用远程实现对象）执行。
+
+SimpleDB 在其 `simpledb.jdbc.network` 包中实现了五个远程接口：`RemoteDriver`、`RemoteConnection`、`RemoteStatement`、`RemoteResultSet` 和 `RemoteMetaData`；它们的代码如 图 11.9 所示。这些远程接口与它们对应的 JDBC 接口相似，但有**两个区别**：
+
+
+**图 11.9 SimpleDB 远程接口 (The SimpleDB remote interfaces)**
+
+```java
+import java.rmi.Remote;         // 导入 RMI 的 Remote 接口
+import java.rmi.RemoteException; // 导入 RMI 的 RemoteException
+
+// RemoteDriver 接口：远程数据库驱动，继承自 Remote
+public interface RemoteDriver extends Remote {
+    // connect 方法：返回一个远程数据库连接对象
+    public RemoteConnection connect() throws RemoteException;
+}
+
+// RemoteConnection 接口：远程数据库连接，继承自 Remote
+public interface RemoteConnection extends Remote {
+    // createStatement 方法：创建并返回一个远程 SQL 语句对象
+    public RemoteStatement createStatement() throws RemoteException;
+    // close 方法：关闭远程连接
+    public void close() throws RemoteException;
+}
+
+// RemoteStatement 接口：远程 SQL 语句，继承自 Remote
+public interface RemoteStatement extends Remote {
+    // executeQuery 方法：执行查询并返回远程结果集
+    public RemoteResultSet executeQuery(String qry) throws RemoteException;
+    // executeUpdate 方法：执行更新（插入、删除、修改）并返回受影响的行数
+    public int executeUpdate(String cmd) throws RemoteException;
+}
+
+// RemoteResultSet 接口：远程结果集，继承自 Remote
+public interface RemoteResultSet extends Remote {
+    // next 方法：将游标移动到结果集中的下一行
+    public boolean next() throws RemoteException;
+    // getInt 方法：获取指定字段的整数值
+    public int getInt(String fldname) throws RemoteException;
+    // getString 方法：获取指定字段的字符串值
+    public String getString(String fldname) throws RemoteException;
+    // getMetaData 方法：获取结果集的远程元数据对象
+    public RemoteMetaData getMetaData() throws RemoteException;
+    // close 方法：关闭远程结果集
+    public void close() throws RemoteException;
+}
+
+// RemoteMetaData 接口：远程结果集元数据，继承自 Remote
+public interface RemoteMetaData extends Remote {
+    // getColumnCount 方法：获取结果集中的列数
+    public int getColumnCount() throws RemoteException;
+    // getColumnName 方法：获取指定列索引的列名
+    public String getColumnName(int column) throws RemoteException;
+    // getColumnType 方法：获取指定列的 JDBC 类型
+    public int getColumnType(int column) throws RemoteException;
+    // getColumnDisplaySize 方法：获取指定列的建议最大显示宽度
+    public int getColumnDisplaySize(int column) throws RemoteException;
+}
+```
+
+**图 11.10 从客户端访问远程接口 (Accessing remote interfaces from the client)**
+
+```java
+// 假设 rdvr 变量通过某种方式（例如 RMI 注册表）获取了一个 RemoteDriver 的存根对象
+RemoteDriver rdvr = ...;
+// 通过存根对象调用 connect 方法，实际在服务器上执行，并返回 RemoteConnection 的存根
+RemoteConnection rconn = rdvr.connect();
+// 通过存根对象调用 createStatement 方法，实际在服务器上执行，并返回 RemoteStatement 的存根
+RemoteStatement rstmt = rconn.createStatement();
+```
+
+* 它们仅实现了 图 2.1 中所示的**基本 JDBC 方法**。
+* 它们抛出 **`RemoteException`**（RMI 所要求）而不是 `SQLException`（JDBC 所要求）。
+
+为了感受 RMI 的工作原理，请考虑 图 11.10 的客户端代码片段。代码片段中的每个变量都表示一个远程接口。然而，因为代码片段位于客户端，所以您知道这些变量实际持有的对象是**存根类**的实例。该片段没有显示变量 `rdvr` 如何获取其存根；它通过 **RMI 注册表**来获取，这将在 11.3.2 节中讨论。
+
+考虑对 `rdvr.connect` 的调用。存根通过网络向服务器上其对应的 `RemoteDriver` 实现对象发送请求来执行其 `connect` 方法。这个远程实现对象在服务器上执行其 `connect` 方法，这将导致在服务器上创建一个新的 `RemoteConnection` 实现对象。这个新远程对象的存根被发送回客户端，客户端将其存储为变量 `rconn` 的值。
+
+现在考虑对 `rconn.createStatement` 的调用。存根对象向服务器上其对应的 `RemoteConnection` 实现对象发送请求。这个远程对象执行其 `createStatement` 方法。一个 `RemoteStatement` 实现对象在服务器上被创建，其存根被返回给客户端。
+
+
+### 11.3.2 RMI 注册表 (The RMI Registry)
+
+每个客户端存根对象都包含对其相应的服务器端远程实现对象的引用。客户端一旦拥有一个存根对象，就能够通过该对象与服务器进行交互，并且该交互可能会为客户端创建其他供其使用的存根对象。但问题仍然存在——客户端如何获取它的**第一个存根**？RMI 通过一个名为 **rmi 注册表 (rmi registry)** 的程序解决了这个问题。服务器在 RMI 注册表中发布存根对象，客户端从中检索存根对象。
+
+SimpleDB 服务器只发布一个 `RemoteDriver` 类型的对象。发布操作由 `simpledb.server.StartServer` 程序中的以下三行代码执行：
+
+```java
+// 在本地机器上创建并启动 RMI 注册表，监听端口 1099（RMI 惯用端口）
+Registry reg = LocateRegistry.createRegistry(1099);
+// 创建 RemoteDriver 接口的服务器端实现对象
+RemoteDriver d = new RemoteDriverImpl();
+// 将远程实现对象 d 的存根绑定到 RMI 注册表中，并命名为 "simpledb"，使其可供客户端查找
+reg.rebind("simpledb", d);
+```
+
+`createRegistry` 方法在本地机器上启动 RMI 注册表，使用指定的端口。（约定是使用端口 1099。）方法调用 `reg.rebind` 为远程实现对象 `d` 创建一个存根，将其保存在 rmi 注册表中，并以名称“simpledb”使其可供客户端访问。
+
+客户端可以通过调用注册表上的 `lookup` 方法从注册表中请求一个存根。在 SimpleDB 中，这个请求通过 `NetworkDriver` 类中的以下几行代码完成：
+
+```java
+// 从 JDBC URL 中解析出服务器主机名
+String host = url.replace("jdbc:simpledb://", "");
+// 获取指定主机和端口上的 RMI 注册表引用
+Registry reg = LocateRegistry.getRegistry(host, 1099);
+// 从注册表中查找名为 "simpledb" 的存根对象，并将其强制转换为 RemoteDriver 类型
+RemoteDriver rdvr = (RemoteDriver) reg.lookup("simpledb");
+```
+
+`getRegistry` 方法返回指定主机和端口上 RMI 注册表的引用。对 `reg.lookup` 的调用会访问 RMI 注册表，从中检索名为“simpledb”的存根，并将其返回给调用者。
+
+
+### 11.3.3 线程问题 (Thread Issues)
+
+在构建大型 Java 程序时，始终清楚在任何时候存在哪些线程是一个很好的实践。在 SimpleDB 的基于服务器的执行中，将存在两组线程：**客户端机器上的线程**和**服务器机器上的线程**。
+
+每个客户端在自己的机器上都有自己的线程。这个线程贯穿客户端的整个执行过程；客户端的所有存根对象都从这个线程调用。另一方面，服务器上的每个远程对象都在其自己的独立线程中执行。服务器端远程对象可以被视为一个“迷你服务器”，它等待其存根连接到它。当建立连接时，远程对象执行请求的工作，将返回值发送回客户端，然后耐心等待另一个连接。由 `simpledb.server.Startup` 创建的 `RemoteDriver` 对象运行在一个可以被认为是“数据库服务器”线程的线程中。
+
+每当客户端进行远程方法调用时，**客户端线程会等待**，同时相应的**服务器线程运行**，并在服务器线程返回一个值时恢复执行。类似地，服务器端线程将处于休眠状态，直到其方法之一被调用，并在方法完成后恢复休眠。因此，在任何给定时间，这些客户端和服务器线程中**只有一个**会在做任何事情。非正式地，看起来客户端的线程实际上在远程调用时在客户端和服务器之间来回移动。尽管这种形象可以帮助您可视化客户端-服务器应用程序中的控制流，但理解实际发生的情况也很重要。
+
+区分客户端和服务器端线程的一种方法是打印一些东西。从客户端线程调用 `System.out.println` 时，它会显示在客户端机器上；从服务器线程调用时，它会显示在服务器机器上。
