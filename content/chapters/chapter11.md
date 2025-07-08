@@ -2,13 +2,11 @@
 typora-root-url: ./..\..\public
 ---
 
-Here's the translated content for Chapter 11, "JDBC Interfaces":
-
-## 第 11 章 JDBC 接口 (JDBC Interfaces)
+# 第 11 章 JDBC 接口 (JDBC Interfaces)
 
 本章探讨如何为数据库引擎构建 **JDBC 接口**。编写**嵌入式接口**相对简单——您只需使用引擎中相应的类来编写每个 JDBC 类。编写**基于服务器的接口**还需要开发额外的代码来实现服务器并处理 JDBC 请求。本章展示了如何利用 **Java RMI** 来简化这些额外代码。
 
-### 11.1 SimpleDB API (The SimpleDB API)
+## 11.1 SimpleDB API (The SimpleDB API)
 
 第 2 章介绍了 **JDBC** 作为连接数据库引擎的标准接口，并包含了一些 JDBC 客户端示例。然而，随后的章节没有使用 JDBC。相反，那些章节包含了演示 SimpleDB 引擎不同功能的测试程序。尽管如此，这些测试程序也是数据库客户端；它们只是碰巧使用 SimpleDB API 而不是 JDBC API 来访问 SimpleDB 引擎。
 
@@ -79,14 +77,13 @@ s.close(); // tx.commit() 或 tx.rollback() 也会关闭相关资源
 | `ResultSet`                | `Scan`                      |
 | `ResultSetMetaData`        | `Schema`                    |
 
-
 为了在 SimpleDB 中实现 JDBC API，只需观察两个 API 之间的对应关系。例如，考虑图 11.1。**图 (a)** 包含一个 JDBC 应用程序，它查询数据库，打印其结果集，然后关闭它。**图 (b)** 给出了使用 SimpleDB API 的相应应用程序。代码创建一个新事务，调用规划器获取 SQL 查询的计划，打开计划以获取扫描，遍历扫描，然后关闭它。
 
 图 11.1b 中的代码使用了 SimpleDB 的五个类：`SimpleDB`、`Transaction`、`Planner`、`Plan` 和 `Scan`。JDBC 代码使用了 `Driver`、`Connection`、`Statement` 和 `ResultSet` 接口。图 11.2 显示了这些构造之间的对应关系。
 
 图 11.2 中每行的构造都具有共同的目的。例如，`Connection` 和 `Transaction` 都管理当前事务，`Statement` 和 `Planner` 类处理 SQL 语句，而 `ResultSet` 和 `Scan` 遍历查询结果。这种对应关系是为 SimpleDB 实现 JDBC API 的关键。
 
-### 11.2 嵌入式 JDBC (Embedded JDBC)
+## 11.2 嵌入式 JDBC (Embedded JDBC)
 
 `simpledb.jdbc.embedded` 包为每个 JDBC 接口包含一个类。`EmbeddedDriver` 类的代码如 图 11.3 所示。
 
@@ -99,7 +96,6 @@ JDBC `Driver` 接口实际上有比 `connect` 更多的方法，尽管它们与 
 图 11.5 包含了 `EmbeddedConnection` 类的代码。这个类管理事务。大部分工作由 `Transaction` 对象 `currentTx` 执行。例如，`commit` 方法调用 `currentTx.commit`，然后创建一个新事务作为 `currentTx` 的新值。`createStatement` 方法将一个 `Planner` 对象以及对自身的引用传递给 `EmbeddedStatement` 构造函数。
 
 `EmbeddedConnection` 不直接实现 `Connection`，而是扩展 `ConnectionAdapter`。`ConnectionAdapter` 的代码提供了所有 `Connection` 方法的默认实现，此处省略。
-
 
 **图 11.3 `EmbeddedDriver` 类 (The class EmbeddedDriver)**
 
@@ -229,13 +225,11 @@ class EmbeddedConnection extends ConnectionAdapter { // 假设 ConnectionAdapter
 }
 ```
 
-
 `EmbeddedStatement` 类的代码如 图 11.6 所示。该类负责执行 SQL 语句。`executeQuery` 方法从规划器获取一个计划，并将该计划传递给一个新的 `RemoteResultSet` 对象进行执行。`executeUpdate` 方法只是简单地调用规划器的相应方法。
 
 这两个方法还负责实现 JDBC 的**自动提交 (autocommit)** 语义。如果 SQL 语句正确执行，那么它必须被提交。`executeUpdate` 方法告诉连接，一旦更新语句完成，就立即提交当前事务。另一方面，`executeQuery` 方法不能立即提交，因为其结果集仍在使用中。相反，`Connection` 对象被发送到 `EmbeddedResultSet` 对象，以便其 `close` 方法可以提交事务。
 
 如果在执行 SQL 语句期间出现问题，规划器代码将抛出运行时异常。这两个方法将捕获此异常，回滚事务，并抛出 SQL 异常。
-
 
 **图 11.6 `EmbeddedStatement` 类 (The class EmbeddedStatement)**
 
@@ -293,7 +287,6 @@ class EmbeddedStatement extends StatementAdapter { // 假设 StatementAdapter �
     }
 }
 ```
-
 
 `EmbeddedResultSet` 类包含执行查询计划的方法；其代码如 图 11.7 所示。它的构造函数打开给定它的 `Plan` 对象并保存结果扫描。`next`、`getInt`、`getString` 和 `close` 方法只是简单地调用它们对应的扫描方法。`close` 方法还提交当前事务，这是 JDBC 自动提交语义所要求的。`EmbeddedResultSet` 类从其计划中获取一个 `Schema` 对象。`getMetaData` 方法将此 `Schema` 对象传递给 `EmbeddedMetaData` 构造函数。
 
@@ -413,17 +406,15 @@ public class EmbeddedMetaData extends ResultSetMetaDataAdapter { // 继承自 Re
 }
 ```
 
-### 11.3 远程方法调用 (Remote Method Invocation)
+## 11.3 远程方法调用 (Remote Method Invocation)
 
 本章的其余部分讨论如何实现**基于服务器的 JDBC 接口**。实现基于服务器的 JDBC 最困难的部分是编写服务器端代码。幸运的是，Java 库中包含的类可以完成大部分工作；这些类被称为**远程方法调用 (Remote Method Invocation，简称 RMI)**。本节将介绍 RMI。下一节将展示如何使用 RMI 来编写基于服务器的 JDBC 接口。
-
 
 ### 11.3.1 远程接口 (Remote Interfaces)
 
 **RMI** 使得一台机器（**客户端**）上的 Java 程序能够与另一台机器（**服务器**）上的对象进行交互。要使用 RMI，您必须定义一个或多个扩展 Java `Remote` 接口的接口；这些接口被称为其**远程接口 (remote interfaces)**。您还需要为每个接口编写一个实现类；这些类将驻留在服务器上，被称为**远程实现类 (remote implementation classes)**。RMI 将自动创建相应的实现类，这些类驻留在客户端；这些类被称为**存根类 (stub classes)**。当客户端从存根对象调用方法时，方法调用会通过网络发送到服务器，并由相应的远程实现对象在服务器上执行；然后结果会返回到客户端的存根对象。简而言之，远程方法由客户端（使用存根对象）调用，但在服务器上（使用远程实现对象）执行。
 
 SimpleDB 在其 `simpledb.jdbc.network` 包中实现了五个远程接口：`RemoteDriver`、`RemoteConnection`、`RemoteStatement`、`RemoteResultSet` 和 `RemoteMetaData`；它们的代码如 图 11.9 所示。这些远程接口与它们对应的 JDBC 接口相似，但有**两个区别**：
-
 
 **图 11.9 SimpleDB 远程接口 (The SimpleDB remote interfaces)**
 
@@ -500,7 +491,6 @@ RemoteStatement rstmt = rconn.createStatement();
 
 现在考虑对 `rconn.createStatement` 的调用。存根对象向服务器上其对应的 `RemoteConnection` 实现对象发送请求。这个远程对象执行其 `createStatement` 方法。一个 `RemoteStatement` 实现对象在服务器上被创建，其存根被返回给客户端。
 
-
 ### 11.3.2 RMI 注册表 (The RMI Registry)
 
 每个客户端存根对象都包含对其相应的服务器端远程实现对象的引用。客户端一旦拥有一个存根对象，就能够通过该对象与服务器进行交互，并且该交互可能会为客户端创建其他供其使用的存根对象。但问题仍然存在——客户端如何获取它的**第一个存根**？RMI 通过一个名为 **rmi 注册表 (rmi registry)** 的程序解决了这个问题。服务器在 RMI 注册表中发布存根对象，客户端从中检索存根对象。
@@ -531,7 +521,6 @@ RemoteDriver rdvr = (RemoteDriver) reg.lookup("simpledb");
 
 `getRegistry` 方法返回指定主机和端口上 RMI 注册表的引用。对 `reg.lookup` 的调用会访问 RMI 注册表，从中检索名为“simpledb”的存根，并将其返回给调用者。
 
-
 ### 11.3.3 线程问题 (Thread Issues)
 
 在构建大型 Java 程序时，始终清楚在任何时候存在哪些线程是一个很好的实践。在 SimpleDB 的基于服务器的执行中，将存在两组线程：**客户端机器上的线程**和**服务器机器上的线程**。
@@ -542,13 +531,11 @@ RemoteDriver rdvr = (RemoteDriver) reg.lookup("simpledb");
 
 区分客户端和服务器端线程的一种方法是打印一些东西。从客户端线程调用 `System.out.println` 时，它会显示在客户端机器上；从服务器线程调用时，它会显示在服务器机器上。
 
-
-### 11.4 实现远程接口 (Implementing the Remote Interfaces)
+## 11.4 实现远程接口 (Implementing the Remote Interfaces)
 
 每个远程接口的实现需要两个类：**存根类 (stub class)** 和**远程实现类 (remote implementation class)**。按照约定，远程实现类的名称是其接口名称后附加后缀“Impl.”。您永远不需要知道存根类的名称。
 
 幸运的是，服务器端对象与其存根之间的通信对于所有远程接口都是相同的，这意味着所有通信代码都可以由 **RMI 库类**提供。程序员只需提供特定于每个特定接口的代码。换句话说，程序员根本不需要编写存根类，只需要编写远程实现类中指定服务器为每个方法调用所做的工作的部分。
-
 
 **图 11.11 SimpleDB `RemoteDriverImpl` 类 (The SimpleDB class RemoteDriverImpl)**
 
@@ -572,7 +559,6 @@ public class RemoteDriverImpl extends UnicastRemoteObject implements RemoteDrive
 }
 ```
 
-
 `RemoteDriverImpl` 类是 SimpleDB 服务器的入口点；其代码如 图 11.11 所示。`simpledb.server.Startup` 引导类将只创建一个 `RemoteDriverImpl` 对象，其存根是 RMI 注册表中发布的唯一对象。每次（通过存根）调用其 `connect` 方法时，它都会在服务器上创建一个新的 `RemoteConnectionImpl` 远程对象并在新线程中运行它。RMI 会透明地创建相应的 `RemoteConnection` 存根对象并将其返回给客户端。
 
 请注意，此代码仅关注服务器端对象。特别是，它不包含任何网络代码或对其关联存根对象的引用，并且当它需要创建一个新的远程对象时，它只创建远程实现对象（而不是存根对象）。RMI 类 `UnicastRemoteObject` 包含了执行这些其他任务所需的所有代码。
@@ -580,7 +566,6 @@ public class RemoteDriverImpl extends UnicastRemoteObject implements RemoteDrive
 `RemoteDriverImpl` 的功能与 图 11.3 中的 `EmbeddedDriver` 基本相同。它唯一的区别是其 `connect` 方法没有参数。造成这种差异的原因是，SimpleDB 嵌入式驱动程序可以选择连接到的数据库，而基于服务器的驱动程序必须连接到与远程 SimpleDB 对象关联的数据库。
 
 通常，每个 JDBC 远程实现类的功能都等同于相应的嵌入式 JDBC 类。例如，考虑 `RemoteConnectionImpl` 类，其代码如 图 11.12 所示。请注意与 图 11.5 中的 `EmbeddedConnection` 代码的紧密对应关系。`RemoteStatementImpl`、`RemoteResultsetImpl` 和 `RemoteMetaDataImpl` 类的代码也与其嵌入式等效类类似，在此省略。
-
 
 **图 11.12 SimpleDB `RemoteConnectionImpl` 类 (The SimpleDB class RemoteConnectionImpl)**
 
@@ -637,15 +622,13 @@ class RemoteConnectionImpl extends UnicastRemoteObject implements RemoteConnecti
 }
 ```
 
-
-### 11.5 实现 JDBC 接口 (Implementing the JDBC Interfaces)
+## 11.5 实现 JDBC 接口 (Implementing the JDBC Interfaces)
 
 SimpleDB 的 RMI 远程类实现提供了 `java.sql` 中 JDBC 接口所需的所有功能，除了两点：RMI 方法不抛出 SQL 异常，并且它们不实现接口中的所有方法。也就是说，您有可用的类实现了 `RemoteDriver`、`RemoteConnection` 等接口，但您真正需要的是实现 `Driver`、`Connection` 等接口的类。这是面向对象编程中的一个常见问题，解决方案是将所需的类实现为它们相应存根对象的**客户端包装器 (client-side wrappers)**。
 
 要了解包装器如何工作，请考虑 `NetworkDriver` 类，其代码如 图 11.13 所示。它的 `connect` 方法必须返回 `Connection` 类型的一个对象，在本例中将是一个 `NetworkConnection` 对象。为此，它首先从 RMI 注册表获取一个 `RemoteDriver` 存根。然后它调用存根的 `connect` 方法来获取一个 `RemoteConnection` 存根。通过将 `RemoteConnection` 存根传递给其构造函数，创建所需的 `NetworkConnection` 对象。
 
 其他 JDBC 接口的代码也类似。例如，图 11.14 给出了 `NetworkConnection` 的代码。它的构造函数接受一个 `RemoteConnection` 对象，并使用它来实现其方法。`createStatement` 方法将新创建的 `RemoteStatement` 对象传递给 `NetworkStatement` 构造函数并返回该对象。在这些类中，每当存根对象抛出 `RemoteException` 时，该异常都会被捕获并转换为 `SQLException`。
-
 
 **图 11.13 SimpleDB `NetworkDriver` 类的代码 (The code for the SimpleDB class NetworkDriver)**
 
@@ -681,7 +664,6 @@ public class NetworkDriver extends DriverAdapter { // 继承 DriverAdapter，实
     // 其他 DriverAdapter 的方法在此处被继承或可以被重写
 }
 ```
-
 
 **图 11.14 SimpleDB `NetworkConnection` 类的代码 (The code for the SimpleDB class NetworkConnection)**
 
@@ -725,8 +707,7 @@ public class NetworkConnection extends ConnectionAdapter { // 继承 ConnectionA
 
 Here's the translated "Chapter Summary," "Suggested Reading," and "Exercises" for Chapter 11, "JDBC Interfaces":
 
-
-### 11.6 章总结 (Chapter Summary)
+## 11.6 章总结 (Chapter Summary)
 
 * 应用程序访问数据库有两种方式：通过**嵌入式连接 (embedded connection)** 和通过**基于服务器的连接 (server-based connection)**。SimpleDB 像大多数数据库引擎一样，为这两种连接类型都实现了 JDBC API。
 * SimpleDB 嵌入式 JDBC 连接利用了每个 JDBC 接口都有一个相应的 SimpleDB 类这一事实。
@@ -735,8 +716,7 @@ Here's the translated "Chapter Summary," "Suggested Reading," and "Exercises" fo
 * `connect` 方法是 RMI 远程方法的典型。它在服务器机器上创建一个新的 `RemoteConnectionImpl` 对象，该对象在其自己的线程中运行。然后该方法将此对象的存根返回给 JDBC 客户端。客户端可以在存根上调用 `Connection` 方法，这将导致相应的服务器端实现对象执行这些方法。
 * 基于服务器的 JDBC 客户端不直接使用远程存根，因为它们实现了远程接口而不是 JDBC 接口。相反，客户端对象包装了它们对应的存根对象。
 
-
-### 11.7 建议阅读 (Suggested Reading)
+## 11.7 建议阅读 (Suggested Reading)
 
 有大量专门解释 RMI 的书籍，例如 Grosso (2001)。此外，Oracle 的 RMI 教程可在 [https://docs.oracle.com/javase/tutorial/rmi/index.html](https://docs.oracle.com/javase/tutorial/rmi/index.html) 上找到。
 
@@ -746,8 +726,7 @@ SimpleDB 使用的驱动程序实现技术上称为“Type 4”驱动程序。�
 * Nanda, N. (2002)。Drivers in the wild。*JavaWorld*。检索自 [www.javaworld.com/javaworld/jw-07-2000/jw-0707-jdbc.html](https://www.google.com/search?q=https://www.javaworld.com/javaworld/jw-07-2000/jw-0707-jdbc.html)
 * Nanda, N., & Kumar, S. (2002)。Create your own Type 3 JDBC driver。*JavaWorld*。检索自 [www.javaworld.com/javaworld/jw-05-2002/jw-0517-jdbcdriver.html](https://www.google.com/search?q=https://www.javaworld.com/javaworld/jw-05-2002/jw-0517-jdbcdriver.html)
 
-
-### 11.8 练习 (Exercises)
+## 11.8 练习 (Exercises)
 
 **概念性练习 (Conceptual Exercises)**
 
