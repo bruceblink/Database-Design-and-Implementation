@@ -765,7 +765,7 @@ SimpleDB 使用的驱动程序实现技术上称为“Type 4”驱动程序。�
 
 11.13. 回顾 2.2.4 节，JDBC 包含一个 `PreparedStatement` 接口，它将查询的规划阶段与其扫描的执行分开。查询可以规划一次并执行多次，可能使用不同的常量值。
 考虑以下代码片段：
-` java String qry = "select SName from STUDENT where MajorId = ?"; PreparedStatement ps = conn.prepareStatement(qry); ps.setInt(1, 20); ResultSet rs = ps.executeQuery();  `
+` java String qry = "select SName from STUDENT where MajorId = ?"; PreparedStatement ps = conn.prepareStatement(qry); ps.setInt(1, 20); ResultSet rs = ps.executeQuery(); `
 查询中的“？”字符表示一个未知常量，其值将在执行前分配。一个查询可以有多个未知常量。`setInt`（或 `setString`）方法为第 i 个未知常量赋值。
 (a) 假设预准备查询不包含未知常量。那么 `PreparedStatement` 构造函数从规划器获取计划，并且 `executeQuery` 方法将计划传递给 `ResultSet` 构造函数。实现这个特例，这涉及 `jdbc` 包的更改，但解析器或规划器没有更改。
 (b) 现在修改您的实现，使其处理未知常量。解析器必须更改以识别“？”字符。规划器必须能够从解析器获取未知常量列表；然后可以通过 `setInt` 和 `setString` 方法为这些常量赋值。
