@@ -413,8 +413,6 @@ public class EmbeddedMetaData extends ResultSetMetaDataAdapter { // 继承自 Re
 }
 ```
 
-This section covers how SimpleDB implements a server-based JDBC interface using Java's Remote Method Invocation (RMI).
-
 ### 11.3 远程方法调用 (Remote Method Invocation)
 
 本章的其余部分讨论如何实现**基于服务器的 JDBC 接口**。实现基于服务器的 JDBC 最困难的部分是编写服务器端代码。幸运的是，Java 库中包含的类可以完成大部分工作；这些类被称为**远程方法调用 (Remote Method Invocation，简称 RMI)**。本节将介绍 RMI。下一节将展示如何使用 RMI 来编写基于服务器的 JDBC 接口。
@@ -543,3 +541,184 @@ RemoteDriver rdvr = (RemoteDriver) reg.lookup("simpledb");
 每当客户端进行远程方法调用时，**客户端线程会等待**，同时相应的**服务器线程运行**，并在服务器线程返回一个值时恢复执行。类似地，服务器端线程将处于休眠状态，直到其方法之一被调用，并在方法完成后恢复休眠。因此，在任何给定时间，这些客户端和服务器线程中**只有一个**会在做任何事情。非正式地，看起来客户端的线程实际上在远程调用时在客户端和服务器之间来回移动。尽管这种形象可以帮助您可视化客户端-服务器应用程序中的控制流，但理解实际发生的情况也很重要。
 
 区分客户端和服务器端线程的一种方法是打印一些东西。从客户端线程调用 `System.out.println` 时，它会显示在客户端机器上；从服务器线程调用时，它会显示在服务器机器上。
+
+
+### 11.4 实现远程接口 (Implementing the Remote Interfaces)
+
+每个远程接口的实现需要两个类：**存根类 (stub class)** 和**远程实现类 (remote implementation class)**。按照约定，远程实现类的名称是其接口名称后附加后缀“Impl.”。您永远不需要知道存根类的名称。
+
+幸运的是，服务器端对象与其存根之间的通信对于所有远程接口都是相同的，这意味着所有通信代码都可以由 **RMI 库类**提供。程序员只需提供特定于每个特定接口的代码。换句话说，程序员根本不需要编写存根类，只需要编写远程实现类中指定服务器为每个方法调用所做的工作的部分。
+
+
+**图 11.11 SimpleDB `RemoteDriverImpl` 类 (The SimpleDB class RemoteDriverImpl)**
+
+```java
+import java.rmi.RemoteException;      // 导入 RMI 的 RemoteException
+import java.rmi.server.UnicastRemoteObject; // 导入 RMI 用于远程对象的基类
+
+public class RemoteDriverImpl extends UnicastRemoteObject implements RemoteDriver {
+    // 构造函数：必须声明抛出 RemoteException
+    public RemoteDriverImpl() throws RemoteException {
+        // UnicastRemoteObject 的构造函数会处理远程对象导出细节
+    }
+
+    // connect 方法：实现 RemoteDriver 接口的 connect 方法
+    @Override // 明确表示重写接口方法
+    public RemoteConnection connect() throws RemoteException {
+        // 在服务器端创建一个新的 RemoteConnectionImpl 实例并返回
+        // RMI 会自动为这个新的远程对象创建存根并将其返回给客户端
+        return new RemoteConnectionImpl(); // 注意：这里创建了一个新的连接实现对象
+    }
+}
+```
+
+
+`RemoteDriverImpl` 类是 SimpleDB 服务器的入口点；其代码如 图 11.11 所示。`simpledb.server.Startup` 引导类将只创建一个 `RemoteDriverImpl` 对象，其存根是 RMI 注册表中发布的唯一对象。每次（通过存根）调用其 `connect` 方法时，它都会在服务器上创建一个新的 `RemoteConnectionImpl` 远程对象并在新线程中运行它。RMI 会透明地创建相应的 `RemoteConnection` 存根对象并将其返回给客户端。
+
+请注意，此代码仅关注服务器端对象。特别是，它不包含任何网络代码或对其关联存根对象的引用，并且当它需要创建一个新的远程对象时，它只创建远程实现对象（而不是存根对象）。RMI 类 `UnicastRemoteObject` 包含了执行这些其他任务所需的所有代码。
+
+`RemoteDriverImpl` 的功能与 图 11.3 中的 `EmbeddedDriver` 基本相同。它唯一的区别是其 `connect` 方法没有参数。造成这种差异的原因是，SimpleDB 嵌入式驱动程序可以选择连接到的数据库，而基于服务器的驱动程序必须连接到与远程 SimpleDB 对象关联的数据库。
+
+通常，每个 JDBC 远程实现类的功能都等同于相应的嵌入式 JDBC 类。例如，考虑 `RemoteConnectionImpl` 类，其代码如 图 11.12 所示。请注意与 图 11.5 中的 `EmbeddedConnection` 代码的紧密对应关系。`RemoteStatementImpl`、`RemoteResultsetImpl` 和 `RemoteMetaDataImpl` 类的代码也与其嵌入式等效类类似，在此省略。
+
+
+**图 11.12 SimpleDB `RemoteConnectionImpl` 类 (The SimpleDB class RemoteConnectionImpl)**
+
+```java
+import java.rmi.RemoteException;
+import java.rmi.server.UnicastRemoteObject;
+import simpledb.server.SimpleDB; // 导入 SimpleDB 引擎核心类
+import simpledb.tx.Transaction; // 导入 SimpleDB 事务类
+import simpledb.plan.Planner;   // 导入 SimpleDB 规划器类
+
+// RemoteConnectionImpl 继承自 UnicastRemoteObject 并实现 RemoteConnection 接口
+class RemoteConnectionImpl extends UnicastRemoteObject implements RemoteConnection {
+    private SimpleDB db;          // SimpleDB 数据库实例
+    private Transaction currentTx; // 当前事务对象
+    private Planner planner;      // 规划器对象
+
+    // 构造函数：接受 SimpleDB 实例，初始化事务和规划器
+    RemoteConnectionImpl(SimpleDB db) throws RemoteException {
+        // UnicastRemoteObject 的构造函数处理远程对象导出细节
+        this.db = db;
+        currentTx = db.newTx(); // 开启一个新事务
+        planner = db.planner();   // 获取数据库的规划器
+    }
+
+    // createStatement 方法：创建并返回一个远程语句对象
+    @Override // 明确表示重写接口方法
+    public RemoteStatement createStatement() throws RemoteException {
+        // 返回一个新的 RemoteStatementImpl 实例，并将当前连接和规划器传递给它
+        return new RemoteStatementImpl(this, planner); // 注意：这里创建了一个新的语句实现对象
+    }
+
+    // close 方法：关闭连接，通常会提交当前事务
+    @Override // 明确表示重写接口方法
+    public void close() throws RemoteException {
+        currentTx.commit(); // 关闭时提交当前事务
+    }
+
+    // getTransaction 方法：获取当前事务对象（包私有，供其他实现类使用）
+    Transaction getTransaction() {
+        return currentTx;
+    }
+
+    // commit 方法：提交当前事务，并开启一个新事务（包私有）
+    void commit() {
+        currentTx.commit();
+        currentTx = db.newTx(); // 开启一个新的事务以供后续操作使用
+    }
+
+    // rollback 方法：回滚当前事务，并开启一个新事务（包私有）
+    void rollback() {
+        currentTx.rollback();
+        currentTx = db.newTx(); // 开启一个新的事务以供后续操作使用
+    }
+}
+```
+
+
+### 11.5 实现 JDBC 接口 (Implementing the JDBC Interfaces)
+
+SimpleDB 的 RMI 远程类实现提供了 `java.sql` 中 JDBC 接口所需的所有功能，除了两点：RMI 方法不抛出 SQL 异常，并且它们不实现接口中的所有方法。也就是说，您有可用的类实现了 `RemoteDriver`、`RemoteConnection` 等接口，但您真正需要的是实现 `Driver`、`Connection` 等接口的类。这是面向对象编程中的一个常见问题，解决方案是将所需的类实现为它们相应存根对象的**客户端包装器 (client-side wrappers)**。
+
+要了解包装器如何工作，请考虑 `NetworkDriver` 类，其代码如 图 11.13 所示。它的 `connect` 方法必须返回 `Connection` 类型的一个对象，在本例中将是一个 `NetworkConnection` 对象。为此，它首先从 RMI 注册表获取一个 `RemoteDriver` 存根。然后它调用存根的 `connect` 方法来获取一个 `RemoteConnection` 存根。通过将 `RemoteConnection` 存根传递给其构造函数，创建所需的 `NetworkConnection` 对象。
+
+其他 JDBC 接口的代码也类似。例如，图 11.14 给出了 `NetworkConnection` 的代码。它的构造函数接受一个 `RemoteConnection` 对象，并使用它来实现其方法。`createStatement` 方法将新创建的 `RemoteStatement` 对象传递给 `NetworkStatement` 构造函数并返回该对象。在这些类中，每当存根对象抛出 `RemoteException` 时，该异常都会被捕获并转换为 `SQLException`。
+
+
+**图 11.13 SimpleDB `NetworkDriver` 类的代码 (The code for the SimpleDB class NetworkDriver)**
+
+```java
+import java.sql.Connection;       // 导入 JDBC Connection 接口
+import java.sql.DriverPropertyInfo; // 导入 JDBC DriverPropertyInfo 类
+import java.sql.SQLException;     // 导入 JDBC SQLException 类
+import java.sql.SQLFeatureNotSupportedException; // 导入 JDBC SQLFeatureNotSupportedException
+import java.rmi.registry.LocateRegistry; // 导入 RMI 注册表定位类
+import java.rmi.registry.Registry;       // 导入 RMI 注册表接口
+import java.util.Properties;
+import java.util.logging.Logger;
+
+public class NetworkDriver extends DriverAdapter { // 继承 DriverAdapter，实现 JDBC Driver 接口
+    // connect 方法：连接到 SimpleDB 数据库（通过网络）
+    @Override // 明确表示重写父类方法
+    public Connection connect(String url, Properties prop) throws SQLException {
+        try {
+            // 从 JDBC URL 中提取主机名 (例如，从 "jdbc:simpledb://localhost" 提取 "localhost")
+            String host = url.replace("jdbc:simpledb://", "");
+            // 获取指定主机和端口上的 RMI 注册表引用 (端口 1099 是 RMI 惯例)
+            Registry reg = LocateRegistry.getRegistry(host, 1099);
+            // 从注册表中查找名为 "simpledb" 的 RemoteDriver 存根对象
+            RemoteDriver rdvr = (RemoteDriver) reg.lookup("simpledb");
+            // 调用 RemoteDriver 存根的 connect 方法，在服务器端建立连接，并返回 RemoteConnection 存根
+            RemoteConnection rconn = rdvr.connect();
+            // 将 RemoteConnection 存根包装在 NetworkConnection 对象中，并返回给客户端
+            return new NetworkConnection(rconn);
+        } catch (Exception e) { // 捕获所有可能发生的异常（包括 RemoteException）
+            throw new SQLException(e); // 将捕获到的异常包装为 SQLException 并重新抛出
+        }
+    }
+    // 其他 DriverAdapter 的方法在此处被继承或可以被重写
+}
+```
+
+
+**图 11.14 SimpleDB `NetworkConnection` 类的代码 (The code for the SimpleDB class NetworkConnection)**
+
+```java
+import java.sql.SQLException;
+import java.sql.Statement; // 导入 JDBC Statement 接口
+
+public class NetworkConnection extends ConnectionAdapter { // 继承 ConnectionAdapter，实现 JDBC Connection 接口
+    private RemoteConnection rconn; // 底层 RemoteConnection 存根对象
+
+    // 构造函数：接受一个 RemoteConnection 存根
+    public NetworkConnection(RemoteConnection c) {
+        rconn = c; // 保存 RemoteConnection 存根
+    }
+
+    // createStatement 方法：创建并返回一个 JDBC Statement 对象
+    @Override // 明确表示重写父类方法
+    public Statement createStatement() throws SQLException {
+        try {
+            // 通过底层 RemoteConnection 存根调用 createStatement 方法，在服务器端创建 RemoteStatement
+            RemoteStatement rstmt = rconn.createStatement();
+            // 将 RemoteStatement 存根包装在 NetworkStatement 对象中，并返回给客户端
+            return new NetworkStatement(rstmt);
+        } catch (Exception e) { // 捕获可能发生的异常（包括 RemoteException）
+            throw new SQLException(e); // 将异常包装为 SQLException 并重新抛出
+        }
+    }
+
+    // close 方法：关闭 JDBC 连接
+    @Override // 明确表示重写父类方法
+    public void close() throws SQLException {
+        try {
+            rconn.close(); // 通过底层 RemoteConnection 存根调用 close 方法，关闭服务器端连接
+        } catch (Exception e) { // 捕获可能发生的异常（包括 RemoteException）
+            throw new SQLException(e); // 将异常包装为 SQLException 并重新抛出
+        }
+    }
+    // 其他 ConnectionAdapter 的方法在此处被继承或可以被重写
+}
+```
