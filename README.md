@@ -153,7 +153,7 @@ database-design-and-implementation/
     - 10.8 建议阅读（Suggested Reading）
     - 10.9 习题（Exercises）
 
-11. ### JDBC 接口（JDBC Interfaces）
+11. ### [JDBC 接口（JDBC Interfaces）](content/chapters/chapter11.md#第-11-章-jdbc-接口-jdbc-interfaces)
 
     - 11.1 SimpleDB API（The SimpleDB API）
     - 11.2 嵌入式 JDBC（Embedded JDBC）
@@ -271,8 +271,8 @@ npm run start
 - [x] 第7章： 元数据管理（Metadata Management）
 - [x] 第8章： 查询处理（Query Processing）
 - [x] 第9章： 解析（Parsing）
-- [ ] 第10章： 查询规划（Planning）
-- [ ] 第11章：  JDBC 接口（JDBC Interfaces）
+- [x] 第10章： 查询规划（Planning）
+- [x] 第11章：  JDBC 接口（JDBC Interfaces）
 - [ ] 第12章： 索引（Indexing）
 - [ ] 第13章：物化与排序（Materialization and Sorting）
 - [ ] 第14章： 高效缓冲利用（Effective Buffer Utilization）
@@ -310,7 +310,7 @@ npm run start
 
 ![部署状态](https://img.shields.io/github/deployments/BruceBlink/database-design-and-implementation/Production?label=vercel&logo=vercel)
 ![最近更新](https://img.shields.io/github/last-commit/BruceBlink/database-design-and-implementation?label=最近更新)
-![翻译进度](https://img.shields.io/badge/翻译进度-59%25-green)
+![翻译进度](https://img.shields.io/badge/翻译进度-69%25-green)
 ![维护状态](https://img.shields.io/badge/维护状态-积极维护-brightgreen)
 ![许可证](https://img.shields.io/badge/许可证-MIT-blue)
 
