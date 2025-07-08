@@ -722,3 +722,79 @@ public class NetworkConnection extends ConnectionAdapter { // 继承 ConnectionA
     // 其他 ConnectionAdapter 的方法在此处被继承或可以被重写
 }
 ```
+
+Here's the translated "Chapter Summary," "Suggested Reading," and "Exercises" for Chapter 11, "JDBC Interfaces":
+
+
+### 11.6 章总结 (Chapter Summary)
+
+* 应用程序访问数据库有两种方式：通过**嵌入式连接 (embedded connection)** 和通过**基于服务器的连接 (server-based connection)**。SimpleDB 像大多数数据库引擎一样，为这两种连接类型都实现了 JDBC API。
+* SimpleDB 嵌入式 JDBC 连接利用了每个 JDBC 接口都有一个相应的 SimpleDB 类这一事实。
+* SimpleDB 通过 Java **远程方法调用 (RMI)** 机制实现基于服务器的连接。每个 JDBC 接口都有一个相应的 RMI 远程接口。它们的主要区别在于，它们抛出 `RemoteException`（RMI 所需）而不是 `SQLException`（JDBC 所需）。
+* 每个服务器端远程实现对象都在其自己的线程中执行，等待存根联系它。SimpleDB 启动代码创建一个 `RemoteDriver` 类型的远程实现对象，并将其存根存储在 RMI 注册表中。当 JDBC 客户端需要连接到数据库系统时，它从注册表中获取存根并调用其 `connect` 方法。
+* `connect` 方法是 RMI 远程方法的典型。它在服务器机器上创建一个新的 `RemoteConnectionImpl` 对象，该对象在其自己的线程中运行。然后该方法将此对象的存根返回给 JDBC 客户端。客户端可以在存根上调用 `Connection` 方法，这将导致相应的服务器端实现对象执行这些方法。
+* 基于服务器的 JDBC 客户端不直接使用远程存根，因为它们实现了远程接口而不是 JDBC 接口。相反，客户端对象包装了它们对应的存根对象。
+
+
+### 11.7 建议阅读 (Suggested Reading)
+
+有大量专门解释 RMI 的书籍，例如 Grosso (2001)。此外，Oracle 的 RMI 教程可在 [https://docs.oracle.com/javase/tutorial/rmi/index.html](https://docs.oracle.com/javase/tutorial/rmi/index.html) 上找到。
+
+SimpleDB 使用的驱动程序实现技术上称为“Type 4”驱动程序。在线文章 Nanda (2002) 描述并比较了四种不同的驱动程序类型。配套的在线文章 Nanda 等人 (2002) 将引导您构建一个类似的 Type 3 驱动程序。
+
+* Grosso, W. (2001)。*Java RMI*。Sebastopol, CA：O’Reilly。
+* Nanda, N. (2002)。Drivers in the wild。*JavaWorld*。检索自 [www.javaworld.com/javaworld/jw-07-2000/jw-0707-jdbc.html](https://www.google.com/search?q=https://www.javaworld.com/javaworld/jw-07-2000/jw-0707-jdbc.html)
+* Nanda, N., & Kumar, S. (2002)。Create your own Type 3 JDBC driver。*JavaWorld*。检索自 [www.javaworld.com/javaworld/jw-05-2002/jw-0517-jdbcdriver.html](https://www.google.com/search?q=https://www.javaworld.com/javaworld/jw-05-2002/jw-0517-jdbcdriver.html)
+
+
+### 11.8 练习 (Exercises)
+
+**概念性练习 (Conceptual Exercises)**
+
+11.1. 跟踪基于服务器的演示客户端 `StudentMajor.java` 的代码，使用 `simpledb.jdbc.network` 包中的类。哪些服务器端对象被创建？哪些客户端对象被创建？哪些线程被创建？
+
+11.2. `RemoteStatementImpl` 的 `executeQuery` 和 `executeUpdate` 方法需要一个事务。每次调用 `executeQuery` 或 `executeUpdate` 时，`RemoteStatementImpl` 对象都通过调用 `rconn.getTransaction()` 来获取其事务。一个更简单的策略是在创建每个 `RemoteStatementImpl` 对象时，通过其构造函数将事务传递给它。然而，这将是一个非常糟糕的主意。请举例说明可能发生不正确情况的场景。
+
+11.3. 我们知道远程实现对象驻留在服务器上。但是客户端是否需要远程实现类？客户端是否需要远程接口？创建一个包含 SimpleDB 文件夹 `sql` 和 `remote` 的客户端配置。您可以从这些文件夹中删除哪些类文件而不会导致客户端崩溃？解释您的结果。
+
+**编程练习 (Programming Exercises)**
+
+11.4. 修改 SimpleDB JDBC 类，使其实现 `ResultSet` 的以下方法。对嵌入式和基于服务器的实现都进行修改。
+(a) `beforeFirst` 方法，将结果集重新定位到第一个记录之前（即回到其原始状态）。利用扫描具有相同功能的 `beforeFirst` 方法。
+(b) `absolute(int n)` 方法，将结果集定位到第 n 个记录。（扫描没有相应的 `absolute` 方法。）
+
+11.5. 练习 8.13 要求您实现扫描方法 `afterLast` 和 `previous`。
+(a) 修改 `ResultSet` 实现以包含这些方法。
+(b) 通过修改演示 JDBC 客户端类 `SimpleIJ` 以相反顺序打印其输出表来测试您的代码。
+
+11.6. 练习 9.18 要求您在 SimpleDB 中实现空值。JDBC 的 `getInt` 和 `getString` 方法不返回空值。JDBC 客户端只能通过使用 `ResultSet` 的 `wasNull` 方法来确定最近检索到的值是否为空，如练习 2.8 所解释。
+(a) 修改 `ResultSet` 实现以包含此方法。
+(b) 编写一个 JDBC 程序来测试您的代码。
+
+11.7. JDBC `Statement` 接口包含一个 `close` 方法，该方法关闭该语句可能仍处于打开状态的任何结果集。实现此方法。
+
+11.8. 标准 JDBC 规定 `Connection.close` 方法应关闭其所有语句（如练习 11.7）。实现此功能。
+
+11.9. 标准 JDBC 规定当 `Connection` 对象被垃圾回收时（例如，当客户端程序完成时），连接会自动关闭。此功能很重要，因为它允许数据库系统释放被健忘的客户端遗弃的资源。使用 Java 中的 finalizer 构造来实现此功能。
+
+11.10. SimpleDB 实现了自动提交模式，其中系统自动决定何时提交事务。标准 JDBC 允许客户端关闭自动提交模式并显式提交和回滚其事务。JDBC `Connection` 接口有一个 `setAutoCommit(boolean ac)` 方法，允许客户端打开或关闭自动提交模式，一个 `getAutoCommit` 方法，返回当前的自动提交状态，以及 `commit` 和 `rollback` 方法。
+实现这些方法。
+
+11.11. SimpleDB 服务器允许任何人连接到它。修改 `NetworkDriver` 类，使其 `connect` 方法验证用户。该方法应从传递给它的 `Properties` 对象中提取用户名和密码。然后该方法应将它们与服务器端文本文件的内容进行比较，如果匹配失败则抛出异常。假设新的用户名和密码通过简单地编辑服务器上的文件来添加（或删除）。
+
+11.12. 修改 `RemoteConnectionImpl`，使其一次只允许有限数量的连接。当客户端尝试连接时没有可用连接时，系统应该怎么做？
+
+11.13. 回顾 2.2.4 节，JDBC 包含一个 `PreparedStatement` 接口，它将查询的规划阶段与其扫描的执行分开。查询可以规划一次并执行多次，可能使用不同的常量值。
+考虑以下代码片段：
+` java String qry = "select SName from STUDENT where MajorId = ?"; PreparedStatement ps = conn.prepareStatement(qry); ps.setInt(1, 20); ResultSet rs = ps.executeQuery();  `
+查询中的“？”字符表示一个未知常量，其值将在执行前分配。一个查询可以有多个未知常量。`setInt`（或 `setString`）方法为第 i 个未知常量赋值。
+(a) 假设预准备查询不包含未知常量。那么 `PreparedStatement` 构造函数从规划器获取计划，并且 `executeQuery` 方法将计划传递给 `ResultSet` 构造函数。实现这个特例，这涉及 `jdbc` 包的更改，但解析器或规划器没有更改。
+(b) 现在修改您的实现，使其处理未知常量。解析器必须更改以识别“？”字符。规划器必须能够从解析器获取未知常量列表；然后可以通过 `setInt` 和 `setString` 方法为这些常量赋值。
+
+11.14. 假设您启动一个 JDBC 客户端程序；然而，它花了太长时间才完成，因此您使用 `<CTRL-C>` 取消了它。
+(a) 这对服务器上运行的其他 JDBC 客户端有什么影响？
+(b) 服务器何时以及如何注意到您的 JDBC 客户端程序不再运行？当它发现时会做什么？
+(c) 服务器处理这种情况的最佳方式是什么？
+(d) 设计并实现您对 (c) 的答案。
+
+11.15. 编写一个 Java 类 `Shutdown`，其 `main` 方法优雅地关闭服务器。也就是说，允许现有连接完成，但不应建立新连接。当没有事务运行时，代码应向日志写入一个静止检查点记录，并在控制台上写入一条“可以关闭”消息。（提示：最简单的关闭方法是从 RMI 注册表中删除 SimpleDB 对象。另外，请记住此方法将在与服务器不同的 JVM 中执行。因此，您需要以某种方式修改服务器，使其识别 `Shutdown` 已被调用。）
