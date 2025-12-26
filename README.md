@@ -218,7 +218,7 @@ database-design-and-implementation/
 
 ## 在线阅读
 
-在线文档: [Database Design and Implementation Second Edition 中文翻译](https://database-design-and-implementation.vercel.app/)。
+在线文档: [Database Design and Implementation Second Edition 中文翻译](https://likanug.top/books/database-design-and-implementation-second-edition/)。
 
 ## 本地开发
 
